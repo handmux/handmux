@@ -1,5 +1,5 @@
 import { t } from './i18n';
-import type { ScheduledRule } from './scheduledMessagesApi.js';
+import type { ScheduledRule, ScheduledTask } from './scheduledMessagesApi.js';
 
 const calendarFormatters = new Map<string, Intl.DateTimeFormat>();
 
@@ -53,8 +53,15 @@ export function scheduledRelativeTime(at: number, serverNow: number): string {
     .map(([count, unit]) => t(`scheduled.duration${unit}`, { count })).join(t('scheduled.durationSeparator'));
   return t('scheduled.inDuration', { duration });
 }
-export function scheduledRuleSummary(rule: ScheduledRule): string {
-  if (rule.frequency === 'hourly') return rule.slots.map(slot => t('scheduled.hourlyMinute', { minute: String(slot.minute ?? 0).padStart(2, '0') })).join(' / ');
+export function scheduledRuleSummary(rule: ScheduledRule, includeFrequency = true): string {
+  if (rule.frequency === 'hourly') return rule.slots.map(slot => t(includeFrequency ? 'scheduled.hourlyMinute' : 'scheduled.minuteSlot', { minute: String(slot.minute ?? 0).padStart(2, '0') })).join(' / ');
   const slots = [...rule.slots].sort((a, b) => (a.weekday ?? 0) - (b.weekday ?? 0));
-  return `${t(`scheduled.${rule.frequency}`)} ${slots.map(slot => `${rule.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join(' / ')}`;
+  return `${includeFrequency ? `${t(`scheduled.${rule.frequency}`)} ` : ''}${slots.map(slot => `${rule.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join(' / ')}`;
+}
+
+export function scheduledTaskTimeHint(task: ScheduledTask, serverNow: number): string {
+  if (task.expired) return t('scheduled.expired');
+  if (task.nextAt === null || task.blocked && task.nextAt <= serverNow) return '';
+  const duration = scheduledRelativeTime(task.nextAt, serverNow);
+  return !task.enabled && task.nextAt > serverNow ? t('scheduled.pausedReference', { duration }) : duration;
 }

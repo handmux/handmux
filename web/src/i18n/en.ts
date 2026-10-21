@@ -1,6 +1,10 @@
 // English strings (the default + fallback locale). Keys are namespaced by area: common.*, token.*,
 // settings.*, … Keep this file complete; other locales may omit keys and fall back here.
 export default {
+"scheduled.expired": "Expired",
+"scheduled.resumeExpired": "Resume (expired)",
+"scheduled.pausedReference": "{duration} · not active",
+"scheduled.minuteSlot": "Minute {minute}",
 "scheduled.inDuration": "in {duration}",
 "scheduled.durationSeparator": " ",
 "scheduled.terminate": "Terminate",

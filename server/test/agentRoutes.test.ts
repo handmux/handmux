@@ -992,3 +992,19 @@ it('terminates a persisted scoped task without a live run, shares its ended reas
   for (const action of ['trigger', 'update']) expect((await request(client).post('/agents/scheduled-messages').send({ action, ...scope, id: task.id, revision: result.body.revision, request: { enabled: true } })).status).toBe(409);
   await scheduler.close();
 });
+
+it('rejects resume for expired paused once tasks while preserving explicit send-now', async () => {
+  const h = runtime(); const scope = { tmuxSession: 'work', paneId: '%1' }; let now = Date.parse('2026-10-20T00:00:00Z'); let sends = 0;
+  const scheduler = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => { sends++; return { status: 'queued' }; } });
+  Object.assign(h.value, { scheduledMessages: scheduler }); h.value.scheduledTarget = async () => { throw Error('uses stored target'); };
+  const task = scheduler.create({ ...scope, agentId: 'pi', sessionId: 'original' }, { text: 'paused', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+  const paused = scheduler.update(scope, task.id, task.revision, { enabled: false }); now += 120000;
+  const client = app(h.value);
+  const resumed = await request(client).post('/agents/scheduled-messages').send({ action: 'update', ...scope, id: task.id, revision: paused.revision, request: { enabled: true } });
+  expect(resumed.status).toBe(409); expect(resumed.body.error).toMatch(/expired.*future/i);
+  const snapshot = await request(client).post('/agents/scheduled-messages').send({ action: 'snapshot', ...scope });
+  expect(snapshot.body.tasks[0]).toMatchObject({ state: 'active', enabled: false, expired: true, revision: paused.revision });
+  expect(snapshot.body.tasks[0].endedAt).toBeUndefined(); expect(snapshot.body.tasks[0].lastResult).toBeUndefined();
+  const sent = await request(client).post('/agents/scheduled-messages').send({ action: 'trigger', ...scope, id: task.id, revision: paused.revision });
+  expect(sent.status).toBe(200); expect(sends).toBe(1); await scheduler.close();
+});

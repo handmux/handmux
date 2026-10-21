@@ -9,8 +9,8 @@ vi.mock('../src/scheduledMessagesApi.js', () => ({ scheduledRequest: vi.fn() }))
 const now = Date.parse('2026-10-20T00:00:00Z');
 const scope = { tmuxSession: 'work', paneId: '%1' };
 const task: ScheduledTask = { id: 'task', revision: 1, target: { ...scope, agentId: 'generic', sessionId: 'session' }, text: 'original', state: 'active', enabled: true, timeZone: 'UTC', nextAt: now + 60000, rule: { frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' } };
-function setup(enabled = true) {
-  let current: ScheduledTask = { ...task, enabled };
+function setup(enabled = true, initial: ScheduledTask = task) {
+  let current: ScheduledTask = { ...initial, enabled };
   vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action, fields) => {
     if (action === 'snapshot') return { serverNow: now, timeZone: 'UTC', tasks: [current], exceptions: [] };
     if (action === 'preview') return { nextAt: now + 60000, timeZone: 'UTC' };
@@ -96,4 +96,45 @@ it('resizes wrapped text between three and eight rows, including width changes',
   expect(input.style.height).toBe('100px'); expect(input.style.overflowY).toBe('hidden');
   measured = 180; changed([{ contentRect: { width: 120 } }] as ResizeObserverEntry[], {} as ResizeObserver);
   expect(input.style.height).toBe('180px');
+});
+
+it('shows one once timestamp with relative time and separates recurring frequency badges from slot text', async () => {
+  const once: ScheduledTask = { ...task, rule: { frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] } };
+  const view = setup(true, once); await screen.findByRole('listitem');
+  const meta = view.container.querySelector('.scheduled-list-meta-copy')!.textContent!;
+  expect(meta.match(/2026\/10\/20 00:01/g)).toHaveLength(1);
+  expect(meta).toContain(`(${t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) })})`);
+  view.unmount();
+  const cycle = setup(true); await screen.findByRole('listitem');
+  expect(cycle.container.querySelector('.scheduled-frequency-badge')?.textContent).toBe(t('scheduled.hourly'));
+  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('2026/10/20 00:01');
+  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain(t('scheduled.hourly'));
+});
+it('labels expired paused once schedules and disables resume while normal editing stays paused', async () => {
+  const expired: ScheduledTask = { ...task, enabled: false, expired: true, nextAt: now - 60000, rule: { frequency: 'once', slots: [{ date: '2026-10-19', time: '23:59' }] } };
+  const view = setup(false, expired); await screen.findByRole('listitem');
+  expect(view.container.querySelector('.scheduled-status-paused')).toBeTruthy();
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain(`(${t('scheduled.expired')})`);
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.more') }));
+  expect((screen.getByRole('button', { name: t('scheduled.resumeExpired') }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: t('scheduled.reschedule') })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: t('common.cancel') }));
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.editAction') })); await screen.findByLabelText(t('scheduled.message'));
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.back') })); await waitFor(() => expect(screen.queryByLabelText(t('scheduled.message'))).toBeNull());
+  expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update')).toHaveLength(1);
+  expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update').at(-1)?.[3]).toMatchObject({ request: { enabled: false } });
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.editAction') })); await screen.findByLabelText(t('scheduled.message'));
+  fireEvent.click(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }));
+  fireEvent.change(screen.getByLabelText(t('scheduled.date')), { target: { value: '2026-10-20' } });
+  fireEvent.change(screen.getByLabelText(t('scheduled.time')), { target: { value: '00:05' } });
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.confirm') }));
+  await waitFor(() => expect((screen.getByRole('button', { name: t('scheduled.save') }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.save') }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'update').at(-1)?.[3]).toMatchObject({ request: { enabled: false, slots: [{ date: '2026-10-20', time: '00:05' }] } }));
+});
+it('marks a paused future reference as inactive without adding that label to active plans', async () => {
+  const view = setup(false); await screen.findByRole('listitem');
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain(t('scheduled.pausedReference', { duration: t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) }) }));
+  fireEvent.click(view.container.querySelector('.scheduled-list-main')!);
+  expect(view.container.querySelector('.scheduled-detail-content')?.textContent).toContain(t('scheduled.pausedReference', { duration: t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) }) }));
 });

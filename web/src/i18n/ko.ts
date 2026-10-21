@@ -1,5 +1,9 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.expired": "만료됨",
+"scheduled.resumeExpired": "재개 (만료됨)",
+"scheduled.pausedReference": "{duration} · 비활성",
+"scheduled.minuteSlot": "{minute}분",
 "scheduled.inDuration": "{duration} 후",
 "scheduled.durationSeparator": " ",
 "scheduled.terminate": "종료",

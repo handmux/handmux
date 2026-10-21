@@ -1,5 +1,9 @@
 // 繁體中文 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.expired": "已過期",
+"scheduled.resumeExpired": "恢復（已過期）",
+"scheduled.pausedReference": "{duration} · 未生效",
+"scheduled.minuteSlot": "第{minute}分",
 "scheduled.inDuration": "{duration}後",
 "scheduled.durationSeparator": "",
 "scheduled.terminate": "終止",

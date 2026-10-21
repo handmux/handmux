@@ -149,7 +149,15 @@ export class ScheduledMessagesService {
     if (loaded !== undefined) this.#store.save(this.#state);
   }
   activeTargets(): ScheduledTarget[] { return this.#state.tasks.filter((task) => (task.state === 'active' && task.enabled) || task.blocked).map((task) => structuredClone(task.target)); }
-  snapshot(scope: ScheduledScope) { requiredScope(scope); return structuredClone({ serverNow: this.#now(), timeZone: this.timeZone, tasks: this.#state.tasks.filter((task) => inScope(task.target, scope)), exceptions: this.#state.exceptions.filter((item) => inScope(item.target, scope)) }); }
+  snapshot(scope: ScheduledScope) {
+    requiredScope(scope); const serverNow = this.#now();
+    const tasks: Array<ScheduledTask & { expired?: boolean }> = this.#state.tasks.filter(task => inScope(task.target, scope)).map(task => {
+      if (task.state !== 'active' || task.enabled) return task;
+      const future = nextOccurrence(task.rule, task.timeZone, serverNow);
+      return { ...task, nextAt: future ?? (task.rule.frequency === 'once' ? task.nextAt : null), expired: task.rule.frequency === 'once' && !task.blocked && future === null };
+    });
+    return structuredClone({ serverNow, timeZone: this.timeZone, tasks, exceptions: this.#state.exceptions.filter(item => inScope(item.target, scope)) });
+  }
   preview(raw: unknown, zone = this.timeZone) { const now = this.#now(); const rule = validateRule(raw, zone); validateCutoffLimit(rule, now); return { serverNow: now, timeZone: zone, nextAt: nextOccurrence(rule, zone, now) }; }
   #transaction<T>(operation: () => T): T { const before = structuredClone(this.#state); try { const result = operation(); this.#store.save(this.#state); return structuredClone(result); } catch (error) { this.#state = before; throw error; } }
   #newTask(target: ScheduledTarget, raw: unknown, zone = this.timeZone): ScheduledTask {
@@ -168,7 +176,7 @@ export class ScheduledMessagesService {
       if (task.state !== 'active' || task.claim) throw new ScheduledError('This occurrence is being submitted or has ended', 'conflict');
       if (value.frequency !== undefined) { task.rule = validateRule(value, task.timeZone); validateCutoffLimit(task.rule, now); task.cursor = now; task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null) throw new ScheduledError('Choose a future scheduled time and cutoff'); }
       if (value.text !== undefined) { if (typeof value.text !== 'string' || !value.text.trim() || value.text.length > 256 * 1024) throw new ScheduledError('Message text is required'); task.text = value.text.trim(); }
-      if (value.enabled !== undefined) { if (typeof value.enabled !== 'boolean') invalid(); if (task.blocked && value.enabled) throw new ScheduledError('Resolve uncertain delivery in Queue before creating another schedule', 'conflict'); if (value.enabled && !task.enabled) { task.cursor = now; task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null && (task.rule.frequency === 'once' || now >= Date.parse(task.rule.endsAt))) { task.state = 'ended'; task.endedAt = now; } } task.enabled = value.enabled; }
+      if (value.enabled !== undefined) { if (typeof value.enabled !== 'boolean') invalid(); if (task.blocked && value.enabled) throw new ScheduledError('Resolve uncertain delivery in Queue before creating another schedule', 'conflict'); if (value.enabled && !task.enabled) { task.cursor = now; task.nextAt = nextOccurrence(task.rule, task.timeZone, task.cursor); if (task.nextAt === null && task.rule.frequency === 'once') throw new ScheduledError('This scheduled message has expired. Edit it to choose a future time before resuming.', 'conflict'); if (task.nextAt === null && task.rule.frequency !== 'once' && now >= Date.parse(task.rule.endsAt)) { task.state = 'ended'; task.endedAt = now; } } task.enabled = value.enabled; }
       task.revision++; return task;
     });
   }

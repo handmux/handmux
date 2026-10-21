@@ -185,3 +185,7 @@
 .scheduled-detail-content .settings-page-row-value { max-width: 75%; white-space: normal; overflow: visible; text-overflow: clip; text-align: right; overflow-wrap: anywhere; }
 .scheduled-detail-content .settings-page-row-label { flex: 0 0 auto; white-space: nowrap; }
 .scheduled-detail-content .settings-page-row-value { flex: 1 1 auto; min-width: 0; }
+
+.scheduled-list-summary.has-frequency { display: flex; align-items: center; gap: 6px; }
+.scheduled-list-summary-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.scheduled-list-summary .scheduled-frequency-badge { max-width: 65%; overflow: hidden; text-overflow: ellipsis; }

@@ -376,3 +376,38 @@ it('never reuses manual identities after an automatic occurrence, clock rollback
   expect(ids).toHaveLength(6); expect(new Set(ids).size).toBe(6);
   expect(service.snapshot(scope).tasks[0]!.id).toBe(task.id); await service.close(); await restored.close();
 });
+
+it('projects expired paused once schedules without changing storage and rejects resume until rescheduled', async () => {
+  const h = harness(); const task = h.service.create(target, { text: 'paused', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] });
+  const paused = h.service.update(scope, task.id, task.revision, { enabled: false });
+  h.advance(2); const before = structuredClone(h.store.value);
+  expect(h.service.snapshot(scope).tasks[0]).toMatchObject({ state: 'active', enabled: false, expired: true, nextAt: task.nextAt });
+  expect(h.store.value).toEqual(before);
+  expect(() => h.service.update(scope, task.id, paused.revision, { enabled: true })).toThrow(/expired.*future/i);
+  expect(h.store.value).toEqual(before);
+  const rescheduled = h.service.update(scope, task.id, paused.revision, { frequency: 'once', slots: [{ date: '2026-10-20', time: '00:05' }], text: 'updated', enabled: true });
+  expect(rescheduled).toMatchObject({ state: 'active', enabled: true, text: 'updated', nextAt: Date.parse('2026-10-20T00:05:00Z') });
+  await h.service.tick(); expect(h.sent).toHaveLength(0);
+});
+it('projects the next remaining slot for paused multi-once tasks instead of treating an old nextAt as expiry', () => {
+  const h = harness(); const task = h.service.create(target, { text: 'multi', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:05' }] });
+  const paused = h.service.update(scope, task.id, task.revision, { enabled: false }); h.advance(2);
+  const before = structuredClone(h.store.value);
+  expect(h.service.snapshot(scope).tasks[0]).toMatchObject({ expired: false, nextAt: Date.parse('2026-10-20T00:05:00Z') });
+  expect(h.store.value).toEqual(before);
+  expect(h.service.update(scope, task.id, paused.revision, { enabled: true })).toMatchObject({ state: 'active', enabled: true, nextAt: Date.parse('2026-10-20T00:05:00Z') });
+});
+
+it('projects a paused recurrence future reference and excludes uncertainty from once expiry', async () => {
+  const h = harness(); const task = h.service.create(target, { text: 'repeat', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' });
+  const paused = h.service.update(scope, task.id, task.revision, { enabled: false }); h.advance(65);
+  const before = structuredClone(h.store.value);
+  expect(h.service.snapshot(scope).tasks[0]).toMatchObject({ nextAt: Date.parse('2026-10-20T02:01:00Z'), enabled: false });
+  expect(h.store.value).toEqual(before);
+  expect(h.service.update(scope, task.id, paused.revision, { enabled: true }).nextAt).toBe(Date.parse('2026-10-20T02:01:00Z'));
+  const store = new MemoryScheduledStore(); let now = Date.parse('2026-10-20T00:00:00Z');
+  const uncertain = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async () => ({ status: 'unknown' }) });
+  uncertain.create(target, { text: 'unknown', frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }, { date: '2026-10-20', time: '00:02' }] });
+  now += 60000; await uncertain.tick(); now += 120000;
+  expect(uncertain.snapshot(scope).tasks[0]).toMatchObject({ enabled: false, blocked: true, expired: false });
+});

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { scheduledRequest } from '../scheduledMessagesApi.js';
 import type { ScheduledException, ScheduledRule, ScheduledTask, ScheduledScope } from '../scheduledMessagesApi.js';
-import { scheduledDisplayLocal, scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary, scheduledRelativeTime, scheduledRuleSummary } from '../scheduledMessagesPresentation.js';
+import { scheduledDisplayLocal, scheduledLocalInput, scheduledOnceDefault, scheduledRuleComplete, scheduledSummary, scheduledRelativeTime, scheduledRuleSummary, scheduledTaskTimeHint } from '../scheduledMessagesPresentation.js';
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import type { ScheduledMessagesSnapshotController } from '../hooks/useScheduledMessagesSnapshot.js';
 import { useHistoryLayer, unwindHistory } from '../hooks/useBackButton.js';
@@ -29,13 +29,14 @@ interface Editor {
 }
 interface Confirmation { message: string; action: () => void; label?: string }
 
-function StatusBadge({ selection }: { selection: Selection }) {
+function StatusBadge({ selection, showFrequency = false }: { selection: Selection; showFrequency?: boolean }) {
   const task = selection.kind === 'task' ? selection.item : null;
-  if (task?.state === 'active' && task.enabled && !task.blocked) return null;
+  const recurring = showFrequency && task?.state === 'active' && task.rule.frequency !== 'once';
+  if (task?.state === 'active' && task.enabled && !task.blocked && !recurring) return null;
   const status = selection.kind === 'exception' || task?.state === 'exception' ? 'exception'
-    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : 'paused';
+    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : task?.enabled ? 'frequency' : 'paused';
   const label = status === 'exception' ? 'scheduled.exception' : `scheduled.${status}`;
-  return <span className={`scheduled-status-badge scheduled-status-${status}`}>{t(label)}</span>;
+  return <span className={`scheduled-status-badge scheduled-status-${status}${recurring ? ' scheduled-frequency-badge' : ''}`}>{recurring ? `${t(`scheduled.${task.rule.frequency}`)}${status === 'frequency' ? '' : ` · ${t(label)}`}` : t(label)}</span>;
 }
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return <div className="settings-page-row settings-page-value-row">
@@ -61,7 +62,7 @@ function sameRowSelection(left: Selection, right: Selection): boolean {
   if (left.kind === 'task' && right.kind === 'task') {
     const a = left.item; const b = right.item;
     return a.state === b.state && a.enabled === b.enabled && a.blocked === b.blocked && a.claim?.at === b.claim?.at
-      && a.nextAt === b.nextAt && a.endedAt === b.endedAt && a.endedReason === b.endedReason && a.lastAt === b.lastAt && a.lastResult === b.lastResult
+      && a.nextAt === b.nextAt && a.expired === b.expired && a.endedAt === b.endedAt && a.endedReason === b.endedReason && a.lastAt === b.lastAt && a.lastResult === b.lastResult
       && a.rule.frequency === b.rule.frequency && a.rule.endsAt === b.rule.endsAt && a.rule.slots.length === b.rule.slots.length
       && a.rule.slots.every((slot, index) => { const other = b.rule.slots[index]!; return slot.date === other.date && slot.time === other.time && slot.minute === other.minute && slot.weekday === other.weekday; });
   }
@@ -73,25 +74,27 @@ function sameRowSelection(left: Selection, right: Selection): boolean {
   return false;
 }
 interface ScheduledRowProps {
-  selection: Selection; language: string; saving: boolean; pendingAction: string | undefined;
+  selection: Selection; timeHint: string; language: string; saving: boolean; pendingAction: string | undefined;
   onDetail(key: SelectionKey): void; onEdit(key: SelectionKey): void; onMenu(key: SelectionKey): void;
 }
-const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
+const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, timeHint, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
   const { item } = selection;
   const key = { kind: selection.kind, id: item.id };
   const isException = selection.kind === 'exception';
   const task = selection.kind === 'task' ? selection.item : null;
   const exception = selection.kind === 'exception' ? selection.item : null;
   const at = task ? scheduleDateTime(task.state === 'ended' ? task.endedAt : task.nextAt, task.timeZone) : '';
+  const next = `${at}${timeHint ? ` (${timeHint})` : ''}`;
+  const recurring = task?.state === 'active' && task.rule.frequency !== 'once';
   const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
     : task!.state === 'ended' ? `${at}${task!.endedReason === 'terminated' ? '' : ` · ${resultText(task!.lastResult ?? 'submitted')}`}`
-      : task!.rule.frequency === 'once' ? at : scheduledRuleSummary(task!.rule);
+      : task!.rule.frequency === 'once' ? next : `${next} · ${scheduledRuleSummary(task!.rule, false)}`;
   const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
   return <li aria-busy={!!pendingAction} className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`}>
     <button type="button" className="scheduled-list-main" onClick={() => onDetail(key)}>
       <span className="scheduled-list-copy">
-        <span className="scheduled-list-line scheduled-list-summary">{scheduledSummary(item.text)}</span>
-        <span className="scheduled-list-line scheduled-list-meta">{!!pendingAction ? <span className="scheduled-inline-status" role="status">{t(pendingAction === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={selection} />}<span className="scheduled-list-meta-copy">{metadata}</span></span>
+        <span className={`scheduled-list-line scheduled-list-summary${recurring ? ' has-frequency' : ''}`}>{recurring ? <><span className="scheduled-list-summary-text">{scheduledSummary(item.text)}</span>{!pendingAction && <StatusBadge selection={selection} showFrequency />}</> : scheduledSummary(item.text)}</span>
+        <span className="scheduled-list-line scheduled-list-meta">{!!pendingAction ? <span className="scheduled-inline-status" role="status">{t(pendingAction === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : !recurring && <StatusBadge selection={selection} />}<span className="scheduled-list-meta-copy">{metadata}</span></span>
       </span>
     </button>
     {action !== 'more' && <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown || !!task?.claim}
@@ -100,7 +103,7 @@ const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, savin
       disabled={saving} onClick={() => onMenu(key)}><MoreHorizontalIcon /></button>
   </li>;
 
-}, (a, b) => a.language === b.language && a.saving === b.saving && a.pendingAction === b.pendingAction
+}, (a, b) => a.language === b.language && a.timeHint === b.timeHint && a.saving === b.saving && a.pendingAction === b.pendingAction
   && a.onDetail === b.onDetail && a.onEdit === b.onEdit && a.onMenu === b.onMenu && sameRowSelection(a.selection, b.selection));
 
 export interface ScheduledMessageInitialDraft { text: string; sendAt?: number }
@@ -404,8 +407,8 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       disabled: saving || menu.item.blocked === true || !!menu.item.claim,
       onClick: () => { const task = menu.item; closeMenu(); void mutate('trigger', { id: task.id, revision: task.revision }, () => { changeTab(task.rule.frequency === 'once' ? 'ended' : 'active'); if (page === 'detail') returnToList(); }); },
     }, {
-      key: 'enabled', label: t(menu.item.enabled ? 'scheduled.pause' : 'scheduled.resume'),
-      disabled: saving || menu.item.blocked === true,
+      key: 'enabled', label: t(menu.item.enabled ? 'scheduled.pause' : menu.item.expired ? 'scheduled.resumeExpired' : 'scheduled.resume'),
+      disabled: saving || menu.item.blocked === true || menu.item.expired === true,
       onClick: () => { const task = menu.item; closeMenu(); void mutate('update', { id: task.id, revision: task.revision, request: { enabled: !task.enabled } }); },
     }, {
       key: 'terminate', label: t('scheduled.terminate'), danger: true, confirm: true, confirmLabel: t('scheduled.terminateConfirm'), disabled: saving || !!menu.item.claim,
@@ -455,7 +458,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const language = getLangCode();
   const renderList = () => <div className="scheduled-list-body">
       {items.length ? <ul className="scheduled-list">{items.map(selection => <ScheduledMessageRow key={`${selection.kind}:${selection.item.id}`} selection={selection}
-        language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
+        timeHint={selection.kind === 'task' && selection.item.state === 'active' && snapshot ? scheduledTaskTimeHint(selection.item, snapshot.serverNow) : ''} language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
         onDetail={rowDetail} onEdit={rowEdit} onMenu={rowMenu} />)}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
     </div>;
 
@@ -589,7 +592,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       {detail.kind === 'task' ? <>
         <ValueRow label={t('scheduled.repeat')}>{scheduledRuleSummary(detail.item.rule)}</ValueRow>
         <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>
-          {dateTime(detail.item.state === 'ended' ? detail.item.endedAt : detail.item.nextAt, detail.item.timeZone, detail.item.state !== 'ended')}</ValueRow>
+          {dateTime(detail.item.state === 'ended' ? detail.item.endedAt : detail.item.nextAt, detail.item.timeZone)}{detail.item.state === 'active' && snapshot && scheduledTaskTimeHint(detail.item, snapshot.serverNow) ? ` (${scheduledTaskTimeHint(detail.item, snapshot.serverNow)})` : ''}</ValueRow>
         {detail.item.rule.endsAt && <ValueRow label={t('scheduled.cutoff')}>{dateTime(Date.parse(detail.item.rule.endsAt), detail.item.timeZone)}</ValueRow>}
         {detail.item.lastResult && <ValueRow label={t('scheduled.lastResult')}>{resultText(detail.item.lastResult)}</ValueRow>}
       </> : <>
