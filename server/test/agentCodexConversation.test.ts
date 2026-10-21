@@ -1545,3 +1545,18 @@ describe('Codex Conversation adapter', () => {
     expect(await service.interrupt(lease)).toEqual({ status: 'accepted' });
   });
 });
+
+it('keeps recovery on both durable and live provider warnings', async () => {
+  const recovery = { kind: 'usage_limit' as const, retryAt: Date.parse('2026-10-21T00:53:00Z') };
+  const { service, harness, lease } = await setup([{ i: 1, type: 'notice', noticeLevel: 'warning', ts: '2026-10-20T15:30:00Z', text: 'usage limit', recovery }]);
+  const page = await service.readPage(lease.ref, { limit: 20 });
+  expect(page).toMatchObject({ status: 'ok', page: { items: [expect.objectContaining({ recovery })] } });
+  const events: ConversationEvent[] = [];
+  const handle = await service.open(lease, {}, event => { events.push(event); });
+  try {
+    harness.emit({ type: 'error', codex_error_info: 'usage_limit_exceeded', resets_at: '2026-10-21T00:53:00Z', message: 'usage limit' });
+    await vi.waitFor(() => expect(events.some(event => event.type === 'item.settled')).toBe(true));
+    expect(events.find(event => event.type === 'item.opened')).toMatchObject({ draft: { recovery } });
+    expect(events.find(event => event.type === 'item.settled')).toMatchObject({ item: { recovery } });
+  } finally { await handle.close(); }
+});

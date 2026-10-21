@@ -548,6 +548,7 @@ export default function App() {
   };
   const termRef = useRef<TerminalHandle | null>(null);
   const dockRef = useRef<BottomDockHandle | null>(null); // imperative handle into BottomDock — idea panel fills its input box
+  const [scheduledClock, setScheduledClock] = useState<{ key: string; now: number | undefined } | null>(null);
   const agentComposerRef = useRef<AgentConversationComposerHandle | null>(null);
   const [terminalFocused, setTerminalFocused] = useState(false);
   const terminalFocusedRef = useRef(false);
@@ -3753,6 +3754,11 @@ export default function App() {
                   followLatestRequest={chatFollowLatest.paneId === current.paneId
                     ? chatFollowLatest.request : 0}
                   conversationFontSize={conversationFontSize}
+                  {...(scheduledClock?.key === JSON.stringify([current.session.name, current.paneId, normalizedConversationIdentity.agentId, normalizedConversationIdentity.sessionId]) && scheduledClock.now !== undefined ? { scheduledServerNow: scheduledClock.now } : {})}
+                  onScheduleRecovery={recovery => agentComposerRef.current?.openScheduledRecovery({
+                    agentId: normalizedConversationIdentity.agentId, sessionId: normalizedConversationIdentity.sessionId,
+                    tmuxSession: current.session.name, paneId: current.paneId, recovery,
+                  })}
                   onAddToComposer={(text) => agentComposerRef.current?.fill(text)} />
               ) : activationRun
                 && currentAgentDescriptor?.capabilities.conversationActivation === true ? (
@@ -3816,6 +3822,7 @@ export default function App() {
               <AgentConversationComposer
                 ref={agentComposerRef}
                 scheduledRun={currentAgentRun}
+                onScheduledClock={setScheduledClock}
                 tmuxSession={current.session.name}
                 paneId={current.paneId}
                 agentId={composerIdentity.agentId}

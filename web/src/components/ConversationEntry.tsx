@@ -1,3 +1,5 @@
+import type { ConversationRecovery } from '../agentConversationTypes.js';
+import { scheduledRecoveryTime } from '../scheduledMessagesPresentation.js';
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../markdown.js';
 import { useDocCodeCopy } from '../hooks/useDocCodeCopy.js';
@@ -168,6 +170,8 @@ export function ConversationEntry({
   renderTool,
   renderGoal,
   onOpenCompaction,
+  onScheduleRecovery,
+  scheduledServerNow,
   downloadResource,
   copyId,
   fontSize = 15,
@@ -177,6 +181,8 @@ export function ConversationEntry({
   renderTool: (message: TranscriptMessage, running: boolean) => ReactNode;
   renderGoal?: (message: TranscriptMessage) => ReactNode;
   onOpenCompaction: (message: TranscriptMessage) => void;
+  onScheduleRecovery?: (recovery: ConversationRecovery) => void;
+  scheduledServerNow?: number;
   downloadResource?: AgentConversationController['downloadResource'];
   copyId: string;
   fontSize?: number;
@@ -210,12 +216,13 @@ export function ConversationEntry({
   }
   if (message.type === 'thinking') return null;
   if (message.type === 'notice') {
-    return message.noticeLevel === 'error'
-      ? <div className="chat-turn-error" role="status" data-conversation-copy-root
-        data-conversation-copy-id={`${copyId}:notice`}>{message.text}</div>
-      : <div className={`chat-turn-notice is-${message.noticeLevel === 'warning' ? 'warning' : 'info'}`}
-        role="status" data-conversation-copy-root data-conversation-copy-id={`${copyId}:notice`}>
-        {message.noticeLevel === 'warning' && <span className="chat-turn-warning-icon" aria-hidden="true">!</span>}{message.text}</div>;
+    const warning = message.noticeLevel === 'warning';
+    return <div className={message.noticeLevel === 'error' ? 'chat-turn-error' : `chat-turn-notice is-${warning ? 'warning' : 'info'}`} role="status" data-conversation-copy-root data-conversation-copy-id={`${copyId}:notice`}>
+        {warning && <span className="chat-turn-warning-icon" aria-hidden="true">!</span>}{message.text}
+      {message.recovery?.kind === 'usage_limit' && onScheduleRecovery && <button type="button" className="chat-notice-recovery chat-copy-ignore" onClick={() => onScheduleRecovery(message.recovery!)}>
+        {t((scheduledServerNow === undefined || scheduledRecoveryTime(message.recovery.retryAt, scheduledServerNow) === undefined) ? 'scheduled.scheduleMessage' : 'scheduled.continueAfterLimit')}
+      </button>}
+    </div>;
   }
   const content = message.role !== 'user'
     ? <AssistantMarkdown text={message.text || ''} streaming={!!message.streaming}

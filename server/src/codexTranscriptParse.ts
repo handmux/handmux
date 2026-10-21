@@ -1,3 +1,5 @@
+import { codexUsageLimitRecovery } from './agents/codexUsageLimitRecovery.js';
+import type { ConversationRecovery } from './agent-runtime/conversationTypes.js';
 import { codexPlanSnapshot } from './codexPlan.js';
 import { codexGoalMessageId, codexItemMessageId } from './codexMessageIdentity.js';
 import type { CodexPlanStep } from './codexPlan.js';
@@ -25,6 +27,7 @@ export interface CodexTranscriptMessage extends SourceIdentity {
   ts: string | undefined;
   role?: 'user' | 'assistant';
   text?: string;
+  recovery?: ConversationRecovery;
   noticeLevel?: 'info' | 'warning' | 'error';
   name?: string;
   args?: string;
@@ -612,8 +615,10 @@ export function createCodexTranscriptParser(): CodexTranscriptParser {
         const payloadError = asRecord(payload.error);
         if (payload.type === 'task_complete' && typeof payloadError.message === 'string'
           && payloadError.message.trim()) {
+          const recovery = codexUsageLimitRecovery(payloadError, ts ? Date.parse(ts) : undefined);
           messages.push({
             i, type: 'notice', noticeLevel: 'warning', text: payloadError.message.trim(), ts,
+            ...(recovery ? { recovery } : {}),
             ...(typeof payload.turn_id === 'string' && payload.turn_id ? { turnId: payload.turn_id } : {}),
           });
         }

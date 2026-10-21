@@ -519,3 +519,13 @@ describe('image-view tool paths and outputs', () => {
     expect(JSON.stringify(parsed)).toContain('HIDDEN_IMAGE_DATA');
   });
 });
+
+it('preserves usage-limit metadata on real warnings without treating quoted user text as recovery', () => {
+  const text = "You've hit your usage limit. Try again at Oct 21st, 2026 12:53 AM +08:00.";
+  const parsed = parseCodexTranscript([
+    JSON.stringify({ timestamp: '2026-10-20T15:30:00Z', type: 'event_msg', payload: { type: 'task_complete', error: { message: text, codex_error_info: 'usage_limit_exceeded' } } }),
+    row({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] }),
+  ]);
+  expect(parsed[0].recovery).toEqual({ kind: 'usage_limit', retryAt: Date.parse('2026-10-20T16:53:00Z') });
+  expect(parsed[1].recovery).toBeUndefined();
+});

@@ -36,3 +36,10 @@ export function scheduledDisplayLocal(value: string, includeYear = false): strin
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(value);
   return match ? `${includeYear ? `${match[1]}/` : ''}${match[2]}/${match[3]}${match[4] ? ` ${match[4]}` : ''}` : value;
 }
+
+/** Scheduling is minute-granular: never truncate the one-minute recovery margin. */
+export function scheduledRecoveryTime(retryAt: number | undefined, now: number): number | undefined {
+  if (retryAt === undefined || !Number.isSafeInteger(retryAt) || retryAt <= 0 || retryAt > 8_640_000_000_000_000 - 120000) return undefined;
+  const at = Math.ceil((retryAt + 60000) / 60000) * 60000;
+  return at > now ? at : undefined;
+}

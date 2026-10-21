@@ -217,12 +217,13 @@ function draft(
     };
   }
   if (raw.kind === 'notice') {
+    const recovery = noticeRecovery(raw.recovery);
     if (!['info', 'warning', 'error'].includes(String(raw.level))
       || !optionalText(raw.code, 256) || !text(raw.message, 4096)) return null;
     return {
       kind: 'notice', ...base, level: raw.level as 'info' | 'warning' | 'error',
       ...(raw.code === undefined ? {} : { code: raw.code }),
-      message: raw.message,
+      message: raw.message, ...(recovery ? { recovery } : {}),
     };
   }
   return null;
@@ -340,4 +341,10 @@ export function normalizeConversationDelta(
 
 export function validConversationId(value: unknown): value is string {
   return typeof value === 'string' && ITEM_ID_RE.test(value);
+}
+
+function noticeRecovery(value: unknown): { kind: 'usage_limit'; retryAt?: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value as { kind?: unknown }).kind !== 'usage_limit') return undefined;
+  const retryAt = (value as { retryAt?: unknown }).retryAt;
+  return { kind: 'usage_limit', ...(typeof retryAt === 'number' && Number.isSafeInteger(retryAt) && retryAt > 0 && retryAt <= 8_640_000_000_000_000 ? { retryAt } : {}) };
 }

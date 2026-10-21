@@ -1,3 +1,6 @@
+import { createRef } from 'react';
+import { ConversationEntry } from '../src/components/ConversationEntry.js';
+import type { AgentConversationComposerHandle } from '../src/components/AgentConversationComposer.js';
 import fs from 'node:fs';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -194,4 +197,69 @@ it('keeps pane scope and existing records when the current run is missing or cha
   view.rerender(<Composer paneId="%1" scheduledRun={{ ...run, runId: 'replacement' }} />);
   expect(screen.getByRole('dialog', { name: t('scheduled.title') })).toBeTruthy();
   expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'snapshot')).toHaveLength(1);
+});
+
+it('opens an unknown Agent notice recovery in the existing composer sheet without replacing its draft or creating a task', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action) => action === 'snapshot' ? empty : { nextAt: now + 600000, timeZone: 'UTC' });
+  const handle = createRef<AgentConversationComposerHandle>();
+  const recovery = { kind: 'usage_limit' as const, retryAt: now + 9 * 60000 };
+  render(<><AgentConversationComposer ref={handle} agentId="new-agent" sessionId="session" tmuxSession="work" paneId="%1" scheduledRun={run} busy={false} conversation={conversation()} />
+    <ConversationEntry scheduledServerNow={now} message={{ type: 'notice', text: 'limit warning https://example.com', recovery }} running={false} copyId="warning" renderTool={() => null} onOpenCompaction={() => {}}
+      onScheduleRecovery={value => handle.current?.openScheduledRecovery({ agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', recovery: value })} />
+  </>);
+  await act(async () => { await Promise.resolve(); });
+  const textarea = document.querySelector<HTMLTextAreaElement>('.agent-composer textarea') ?? document.querySelector<HTMLTextAreaElement>('textarea')!;
+  fireEvent.change(textarea, { target: { value: 'my unsent message' } });
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.continueAfterLimit') }));
+  const message = await screen.findByLabelText(t('scheduled.message'));
+  expect((message as HTMLTextAreaElement).value).toBe(t('common.continue'));
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 15:40');
+  expect(document.querySelector('textarea')).toBe(textarea);
+  expect(textarea.value).toBe('my unsent message');
+  expect(scheduledRequest).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), 'create', expect.anything());
+  fireEvent.click(screen.getByRole('button', { name: t('common.close') }));
+  expect(screen.queryByLabelText(t('scheduled.message'))).toBeNull();
+});
+
+it('waits for the shared server snapshot despite client clock skew and rounds recovery seconds upward once', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2099-01-01T00:00:00Z'));
+  let release!: (value: ScheduledSnapshot) => void;
+  const pending = new Promise<ScheduledSnapshot>(resolve => { release = resolve; });
+  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action) => action === 'snapshot' ? pending : { nextAt: now + 11 * 60000, timeZone: 'UTC' });
+  const handle = createRef<AgentConversationComposerHandle>();
+  render(<AgentConversationComposer ref={handle} agentId="new-agent" sessionId="session" tmuxSession="work" paneId="%1" scheduledRun={run} busy={false} conversation={conversation()} />);
+  act(() => handle.current!.openScheduledRecovery({ agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', recovery: { kind: 'usage_limit', retryAt: now + 9 * 60000 + 1000 } }));
+  expect(screen.queryByLabelText(t('scheduled.message'))).toBeNull();
+  await act(async () => { release(empty); await pending; });
+  expect((await screen.findByLabelText(t('scheduled.message')) as HTMLTextAreaElement).value).toBe(t('common.continue'));
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 15:41');
+  fireEvent.change(screen.getByLabelText(t('scheduled.message')), { target: { value: 'edited seed' } });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  fireEvent.click(screen.getByRole('button', { name: t('scheduled.save') }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'create')?.[3]).toMatchObject({ request: { text: 'edited seed', frequency: 'once', slots: [{ date: '2026-10-20', time: '15:41' }] } }));
+});
+it.each([undefined, now - 120000])('uses the existing plus-hour default for unknown or expired recovery %s', async retryAt => {
+  vi.mocked(scheduledRequest).mockImplementation(async (_scope, _run, action) => action === 'snapshot' ? empty : { nextAt: now + 3600000, timeZone: 'UTC' });
+  const handle = createRef<AgentConversationComposerHandle>();
+  render(<AgentConversationComposer ref={handle} agentId="new-agent" sessionId="session" tmuxSession="work" paneId="%1" scheduledRun={run} busy={false} conversation={conversation()} />);
+  await act(async () => { await Promise.resolve(); });
+  act(() => handle.current!.openScheduledRecovery({ agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', recovery: { kind: 'usage_limit', ...(retryAt === undefined ? {} : { retryAt }) } }));
+  await screen.findByLabelText(t('scheduled.message'));
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 16:30');
+});
+it('rejects a retained recovery callback after pane or session changes and when send capability is absent', async () => {
+  vi.mocked(scheduledRequest).mockResolvedValue(empty);
+  const handle = createRef<AgentConversationComposerHandle>();
+  const props = { agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', scheduledRun: run, busy: false, conversation: conversation() };
+  const view = render(<AgentConversationComposer ref={handle} {...props} />);
+  await act(async () => { await Promise.resolve(); });
+  const oldOpen = handle.current!.openScheduledRecovery;
+  const request = { agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', recovery: { kind: 'usage_limit' as const } };
+  for (const changed of [{ paneId: '%2' }, { sessionId: 'different' }, { conversation: conversation(false) }]) {
+    view.rerender(<AgentConversationComposer ref={handle} {...props} {...changed} />);
+    await act(async () => { await Promise.resolve(); });
+    act(() => oldOpen(request));
+    expect(screen.queryByRole('dialog', { name: t('scheduled.title') })).toBeNull();
+  }
 });

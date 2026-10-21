@@ -176,3 +176,6 @@
 .scheduled-cutoff-choice { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--ct-line); border-radius: 10px; background: var(--ct-chip-2); cursor: pointer; }
 .scheduled-cutoff-choice .scheduled-picker-input { background: var(--ct-chip); border-color: var(--ct-line); }
 .scheduled-quick-label { margin: 0 0 8px; color: var(--ct-muted); font-size: 12px; }
+
+.chat-notice-recovery { display: block; min-height: 44px; margin-top: 2px; padding: 4px 0; border: 0; background: transparent; color: var(--ct-accent); font: inherit; font-size: 13px; text-align: left; }
+.chat-notice-recovery:active { opacity: .65; }

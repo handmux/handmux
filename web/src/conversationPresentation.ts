@@ -279,7 +279,7 @@ export function projectConversationMessages(
     return item.kind === 'notice'
       ? [{
         ...base, type: 'notice', role: 'assistant', text: item.message,
-        noticeLevel: item.level, ...(item.code ? { noticeCode: item.code } : {}),
+        noticeLevel: item.level, ...(item.recovery ? { recovery: item.recovery } : {}), ...(item.code ? { noticeCode: item.code } : {}),
       }]
       : [];
   });

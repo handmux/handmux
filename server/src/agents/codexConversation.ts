@@ -1,3 +1,4 @@
+import { codexUsageLimitRecovery } from './codexUsageLimitRecovery.js';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -504,7 +505,7 @@ function projectDurableMessage(
   }
   if (message.type === 'notice' && typeof message.text === 'string') {
     return [{ ...itemBase(message, sessionId), kind: 'notice', level: message.noticeLevel || 'info',
-      code: 'provider_error', message: clipConversationText(message.text).text }];
+      code: 'provider_error', message: clipConversationText(message.text).text, ...(message.recovery ? { recovery: message.recovery } : {}) }];
   }
   if (message.type === 'thinking' && typeof message.text === 'string') {
     // Codex rollout stores the provider's public reasoning summary, not hidden reasoning content.
@@ -1159,8 +1160,9 @@ export function createCodexConversationAdapter({
         if (event.type === 'cursorReset' || event.type === 'disconnected' || event.type === 'error') {
           if (event.type === 'error' && event.message.trim()) {
             const provisionalId = `codex-stream-error:${sessionId}:${live.sourceSequence + 1}`;
+            const recovery = codexUsageLimitRecovery(event, typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : undefined);
             const draft: ConversationItemDraft = {
-              kind: 'notice', level: 'warning', code: 'provider_error', message: event.message.trim(),
+              kind: 'notice', level: 'warning', code: 'provider_error', message: event.message.trim(), ...(recovery ? { recovery } : {}),
             };
             await emit({ type: 'item.opened', provisionalId, draft });
             await emit({ type: 'item.settled', provisionalId,

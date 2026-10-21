@@ -1,5 +1,7 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.continueAfterLimit": "続行を予約",
+"scheduled.scheduleMessage": "メッセージを予約",
 "scheduled.chooseCutoff": "終了日時を選択してください",
 "scheduled.quickChoices": "クイック選択",
 "scheduled.minuteUnit": "分",

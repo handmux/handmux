@@ -100,9 +100,12 @@ const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, savin
 }, (a, b) => a.language === b.language && a.saving === b.saving && a.pendingAction === b.pendingAction
   && a.onDetail === b.onDetail && a.onEdit === b.onEdit && a.onMenu === b.onMenu && sameRowSelection(a.selection, b.selection));
 
-export default function ScheduledMessagesSheet({ scope, run, onClose, controller }: {
+export interface ScheduledMessageInitialDraft { text: string; sendAt?: number }
+
+export default function ScheduledMessagesSheet({ scope, run, onClose, controller, initialDraft }: {
   scope: ScheduledScope; run: AgentRunRef | null; onClose: () => void;
   controller?: ScheduledMessagesSnapshotController;
+  initialDraft?: ScheduledMessageInitialDraft;
 }) {
   const fallback = useScheduledMessagesSnapshot(scope, controller === undefined);
   const source = controller ?? fallback;
@@ -284,6 +287,17 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     if (copyText !== undefined && page === 'detail') replacePages(['list', 'editor']);
     else enter('editor');
   };
+  const initialDraftApplied = useRef(false);
+  useEffect(() => {
+    if (!initialDraft || !snapshot || initialDraftApplied.current) return;
+    initialDraftApplied.current = true;
+    edit(undefined, undefined, initialDraft.text);
+    if (initialDraft.sendAt !== undefined && initialDraft.sendAt > snapshot.serverNow) {
+      const local = scheduledLocalInput(initialDraft.sendAt, snapshot.timeZone);
+      setEditor(current => current ? { ...current, slots: [{ date: local.slice(0, 10), time: local.slice(11, 16) }] } : current);
+    }
+    setDirty(false);
+  }, [initialDraft, snapshot]);
   const chooseFrequency = (frequency: ScheduledRule['frequency']) => {
     if (!editor || !snapshot || editor.frequency === frequency) return;
     const defaultSlot = scheduledOnceDefault(snapshot.serverNow, zone!)[0]!;

@@ -192,10 +192,13 @@ export interface ConversationInterruptItem extends ConversationItemBase<'interru
   reason?: string;
 }
 
+export interface ConversationRecovery { kind: 'usage_limit'; retryAt?: number }
+
 export interface ConversationNoticeItem extends ConversationItemBase<'notice'> {
   level: 'info' | 'warning' | 'error';
   code?: string;
   message: string;
+  recovery?: ConversationRecovery;
 }
 
 export type ConversationItem =
@@ -232,7 +235,7 @@ export type ConversationItemDraft =
     actor: 'user' | 'agent' | 'system'; reason?: string;
   })
   | (ConversationItemDraftBase<'notice'> & {
-    level: 'info' | 'warning' | 'error'; code?: string; message: string;
+    level: 'info' | 'warning' | 'error'; code?: string; message: string; recovery?: ConversationRecovery;
   });
 
 export type ConversationDelta =

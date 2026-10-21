@@ -1,3 +1,6 @@
+import type { ConversationRecovery } from '../agentConversationTypes.js';
+import { scheduledRecoveryTime } from '../scheduledMessagesPresentation.js';
+import type { ScheduledMessageInitialDraft } from './ScheduledMessagesSheet.js';
 import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnapshot.js';
 import ScheduledMessagesSheet from './ScheduledMessagesSheet.js';
 import type { AgentRunRef } from '../agentCatalog.js';
@@ -41,8 +44,11 @@ function autoGrow(element: HTMLTextAreaElement | null): void {
   element.style.height = `${Math.min(element.scrollHeight, 144)}px`;
 }
 
+export interface ScheduledRecoveryRequest { agentId: string; sessionId: string; tmuxSession: string; paneId: string; recovery: ConversationRecovery }
+
 export interface AgentConversationComposerHandle {
   fill(text: string): void;
+  openScheduledRecovery(request: ScheduledRecoveryRequest): void;
 }
 
 export interface AgentConversationComposerProps {
@@ -67,6 +73,7 @@ export interface AgentConversationComposerProps {
   chatTone?: string;
   keyboardInset?: number;
   scheduledRun?: AgentRunRef | null;
+  onScheduledClock?: (clock: { key: string; now: number | undefined }) => void;
   tmuxSession?: string;
   paneId?: string;
 }
@@ -93,6 +100,7 @@ function AgentConversationComposer({
   chatTone = 'dusk',
   keyboardInset = 0,
   scheduledRun = null,
+  onScheduledClock,
   tmuxSession = '',
   paneId = '',
 }: AgentConversationComposerProps, forwardedRef: ForwardedRef<AgentConversationComposerHandle>) {
@@ -103,9 +111,10 @@ function AgentConversationComposer({
   const [error, setError] = useState<string | null>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
   const scheduledScope = { tmuxSession, paneId };
-  const scheduledScopeKey = JSON.stringify([tmuxSession, paneId]);
+  const scheduledScopeKey = JSON.stringify([tmuxSession, paneId, agentId, sessionId]);
   const [scheduledOpen, setScheduledOpen] = useState<string | null>(null);
-  useEffect(() => { setScheduledOpen(null); }, [tmuxSession, paneId]);
+  const [scheduledSeed, setScheduledSeed] = useState<ScheduledMessageInitialDraft | undefined>();
+  useEffect(() => { setScheduledOpen(null); setScheduledSeed(undefined); }, [tmuxSession, paneId, agentId, sessionId]);
   const [editOpen, setEditOpen] = useState(false);
   const [favs, setFavs] = useState(() => loadFavs('agent'));
   const [layout, setLayout] = useState(() => loadShortcutLayout('chat'));
@@ -174,6 +183,7 @@ function AgentConversationComposer({
   const capabilities = conversation.descriptor?.capabilities;
   const canSend = canSendConversation(capabilities);
   const scheduled = useScheduledMessagesSnapshot(scheduledScope, !!tmuxSession && !!paneId && canSend);
+  useEffect(() => { onScheduledClock?.({ key: scheduledScopeKey, now: scheduled.snapshot?.serverNow }); }, [scheduledScopeKey, scheduled.snapshot?.serverNow, onScheduledClock]);
   const scheduledCount = scheduled.snapshot?.tasks.filter((task) => task.state === 'active').length ?? 0;
   const scheduledExceptions = (scheduled.snapshot?.exceptions.length ?? 0) > 0;
   const scheduledLabel = [t('scheduled.title'),
@@ -208,7 +218,22 @@ function AgentConversationComposer({
     });
     requestAnimationFrame(() => ref.current?.focus());
   }, [agentId, sessionId]);
-  useImperativeHandle(forwardedRef, () => ({ fill }), [fill]);
+  const recoveryTarget = useRef({ agentId, sessionId, tmuxSession, paneId, canSend, scheduledRun, descriptor: conversation.descriptor });
+  recoveryTarget.current = { agentId, sessionId, tmuxSession, paneId, canSend, scheduledRun, descriptor: conversation.descriptor };
+  const openScheduledRecovery = useCallback((request: ScheduledRecoveryRequest) => {
+    const current = recoveryTarget.current;
+    if (!current.canSend || !current.scheduledRun || !current.tmuxSession || !current.paneId
+      || request.agentId !== current.agentId || request.sessionId !== current.sessionId
+      || request.tmuxSession !== current.tmuxSession || request.paneId !== current.paneId
+      || current.descriptor?.session.agentId !== current.agentId || current.descriptor.session.sessionId !== current.sessionId
+      || current.scheduledRun.agentId !== current.agentId || current.scheduledRun.sessionId !== current.sessionId
+      || current.scheduledRun.paneId !== current.paneId) return;
+    ref.current?.blur();
+    const sendAt = scheduledRecoveryTime(request.recovery.retryAt, 0);
+    setScheduledSeed({ text: t('common.continue'), ...(sendAt === undefined ? {} : { sendAt }) });
+    setScheduledOpen(JSON.stringify([current.tmuxSession, current.paneId, current.agentId, current.sessionId]));
+  }, []);
+  useImperativeHandle(forwardedRef, () => ({ fill, openScheduledRecovery }), [fill, openScheduledRecovery]);
 
   const insertPaths = (paths: string[]): void => {
     if (!paths.length) return;
@@ -341,7 +366,7 @@ function AgentConversationComposer({
       <div className="cc-quick quick-bar">
         {tmuxSession && paneId && (conversation.descriptor === null || canSend) && <div className="quick-fixed"><button type="button" disabled={!canSend}
           className={`quick-fix scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'scheduled-shortcut-active' : 'scheduled-shortcut-neutral'}`}
-          aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(scheduledScopeKey); }}>
+          aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledSeed(undefined); setScheduledOpen(scheduledScopeKey); }}>
           <ClockIcon /><span>{t('scheduled.shortcut')}</span>{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
         </button></div>}
         <div className="quick-scroll">
@@ -444,7 +469,7 @@ function AgentConversationComposer({
         </OverlayPortal>
       )}
       {scheduledOpen === scheduledScopeKey && canSend && <OverlayPortal chatTone={chatTone} keyboardInset={keyboardInset}>
-        <ScheduledMessagesSheet key={scheduledScopeKey} scope={scheduledScope} run={scheduledRun} controller={scheduled} onClose={() => setScheduledOpen(null)} />
+        <ScheduledMessagesSheet key={scheduledScopeKey} scope={scheduledScope} run={scheduledRun} controller={scheduled} {...(scheduledSeed ? { initialDraft: scheduledSeed } : {})} onClose={() => setScheduledOpen(null)} />
       </OverlayPortal>}
       {editOpen && <CmdFavEditor variant="chat" presets={(shortcuts || DEFAULT_SERVER_SHORTCUTS).chat}
         onChange={refreshShortcuts} onClose={() => setEditOpen(false)} />}

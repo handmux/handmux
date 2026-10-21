@@ -514,3 +514,23 @@ describe('shared Conversation Timeline contract', () => {
     expect(container.querySelector('.agent-conversation-notice.is-error')).toBeNull();
   });
 });
+
+it('keeps generic recovery in live and canonical projections and never infers it from user text', () => {
+  const recovery = { kind: 'usage_limit' as const, retryAt: 1792543980000 };
+  for (const provisional of [true, false]) {
+    const [notice] = projectConversationMessages([{ key: 'limit', provisional, item: { id: 'limit', sessionId: 'session', status: 'complete', kind: 'notice', level: 'warning', message: 'usage limit', recovery } }]);
+    expect(notice?.recovery).toEqual(recovery);
+  }
+  expect(projectConversationMessages([{ key: 'quoted', provisional: false, item: { id: 'quoted', sessionId: 'session', status: 'complete', kind: 'message', role: 'user', content: [{ type: 'text', text: 'usage limit; try again in 2 minutes' }] } }])[0]?.recovery).toBeUndefined();
+});
+
+it.each([true, false])('offers recovery only when this unknown Agent can send (%s)', sendable => {
+  const conversation = controller('new-agent');
+  conversation.descriptor!.capabilities = { history: true, live: 'poll', ...(sendable ? { sendable: true as const } : {}) };
+  conversation.items = [{ key: 'limit', provisional: false, item: { id: 'limit', sessionId: 'session-1', status: 'complete', kind: 'notice', level: 'warning', message: 'limit warning', recovery: { kind: 'usage_limit', retryAt: 1792543980000 } } }];
+  const open = vi.fn();
+  const { container } = render(<AgentConversationView conversation={conversation} onScheduleRecovery={open} scheduledServerNow={1792540000000} />);
+  const button = container.querySelector<HTMLButtonElement>('.chat-notice-recovery');
+  expect(!!button).toBe(sendable);
+  if (button) { fireEvent.click(button); expect(open).toHaveBeenCalledWith({ kind: 'usage_limit', retryAt: 1792543980000 }); }
+});

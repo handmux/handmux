@@ -241,12 +241,13 @@ export function parseConversationDraft(value: unknown): ConversationItemDraft | 
     };
   }
   if (item.kind === 'notice') {
+    const recovery = noticeRecovery(item.recovery);
     if (!['info', 'warning', 'error'].includes(String(item.level))
       || !bounded(item.message, 4096)
       || (item.code !== undefined && !bounded(item.code, 256))) return null;
     return {
       kind: item.kind, ...base, level: item.level as 'info' | 'warning' | 'error',
-      ...(item.code === undefined ? {} : { code: item.code as string }), message: item.message,
+      ...(item.code === undefined ? {} : { code: item.code as string }), message: item.message, ...(recovery ? { recovery } : {}),
     };
   }
   return null;
@@ -671,4 +672,10 @@ export async function downloadAgentConversationResource(
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function noticeRecovery(value: unknown): { kind: 'usage_limit'; retryAt?: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value as { kind?: unknown }).kind !== 'usage_limit') return undefined;
+  const retryAt = (value as { retryAt?: unknown }).retryAt;
+  return { kind: 'usage_limit', ...(typeof retryAt === 'number' && Number.isSafeInteger(retryAt) && retryAt > 0 && retryAt <= 8_640_000_000_000_000 ? { retryAt } : {}) };
 }

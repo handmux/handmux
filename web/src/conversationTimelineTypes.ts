@@ -1,5 +1,6 @@
 import type {
   ConversationContentBlock,
+  ConversationRecovery,
   ConversationTruncation,
 } from './agentConversationTypes.js';
 
@@ -70,6 +71,7 @@ export interface ConversationTimelineMessage extends ConversationPlan {
   summary?: string;
   summaryTruncated?: boolean;
   summaryOriginalBytes?: number;
+  recovery?: ConversationRecovery;
   conversationResources?: ConversationContentBlock[];
   conversationStatus?: string;
   conversationStatusMessage?: string;

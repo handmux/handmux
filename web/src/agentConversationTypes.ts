@@ -1,3 +1,4 @@
+export interface ConversationRecovery { kind: 'usage_limit'; retryAt?: number }
 import type { AgentRunRef } from './agentCatalog.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -68,7 +69,7 @@ export type ConversationItem =
     actor: 'user' | 'agent' | 'system'; reason?: string;
   })
   | (ConversationItemBase<'notice'> & {
-    level: 'info' | 'warning' | 'error'; code?: string; message: string;
+    level: 'info' | 'warning' | 'error'; code?: string; message: string; recovery?: ConversationRecovery;
   });
 
 interface ConversationItemDraftBase<K extends ConversationItem['kind']> {
@@ -95,7 +96,7 @@ export type ConversationItemDraft =
     actor: 'user' | 'agent' | 'system'; reason?: string;
   })
   | (ConversationItemDraftBase<'notice'> & {
-    level: 'info' | 'warning' | 'error'; code?: string; message: string;
+    level: 'info' | 'warning' | 'error'; code?: string; message: string; recovery?: ConversationRecovery;
   });
 
 export type ConversationDelta =

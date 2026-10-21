@@ -1,5 +1,7 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.continueAfterLimit": "계속하기 예약",
+"scheduled.scheduleMessage": "메시지 예약",
 "scheduled.chooseCutoff": "종료 시간을 선택하세요",
 "scheduled.quickChoices": "빠른 선택",
 "scheduled.minuteUnit": "분",

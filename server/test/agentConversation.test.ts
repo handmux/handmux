@@ -729,3 +729,13 @@ describe('ConversationService live handoff', () => {
     live.close();
   });
 });
+
+it('normalizes optional recovery consistently for durable notices and live drafts without losing malformed notices', () => {
+  const notice = { kind: 'notice', level: 'warning', message: 'usage limit', recovery: { kind: 'usage_limit', retryAt: 1792543980000 } };
+  expect(normalizeConversationDraft(notice, 'new-agent')).toMatchObject({ recovery: notice.recovery });
+  expect(normalizeConversationItem({ ...notice, id: 'limit', sessionId: 'session', status: 'complete' }, 'new-agent', 'session')).toMatchObject({ recovery: notice.recovery });
+  for (const retryAt of [NaN, Infinity, -1, 1.5, 8_640_000_000_000_001, 'tomorrow']) {
+    expect(normalizeConversationDraft({ ...notice, recovery: { kind: 'usage_limit', retryAt } }, 'new-agent')).toMatchObject({ message: 'usage limit', recovery: { kind: 'usage_limit' } });
+  }
+  expect(normalizeConversationDraft({ ...notice, recovery: { kind: 'unknown' } }, 'new-agent')).not.toHaveProperty('recovery');
+});

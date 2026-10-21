@@ -1,3 +1,4 @@
+import type { ConversationRecovery } from '../agentConversationTypes.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import LensBoot from './LensBoot.jsx';
 import HistoryActivityIndicator from './HistoryActivityIndicator.js';
@@ -122,6 +123,8 @@ export default function AgentConversationView({
   onOpenTool,
   onAuthFail,
   onAddToComposer,
+  onScheduleRecovery,
+  scheduledServerNow,
   conversationFontSize = 15,
 }: {
   conversation: AgentConversationController;
@@ -134,6 +137,8 @@ export default function AgentConversationView({
   onOpenTool?: () => void;
   onAuthFail?: (() => void) | undefined;
   onAddToComposer?: (text: string) => void;
+  onScheduleRecovery?: (recovery: ConversationRecovery) => void;
+  scheduledServerNow?: number;
   conversationFontSize?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -593,6 +598,8 @@ export default function AgentConversationView({
             <div key={key} className="chat-entry-row" data-completed-entry-key={key}>
               <ConversationEntry message={message} running={running} copyId={key}
                 fontSize={conversationFontSize}
+                {...(scheduledServerNow === undefined ? {} : { scheduledServerNow })}
+                {...(onScheduleRecovery && conversation.descriptor?.capabilities.sendable ? { onScheduleRecovery } : {})}
                 renderTool={(toolMessage, toolRunning) => toolMessage.tool && (
                   <ToolChip tool={toolMessage.tool} running={toolRunning}
                     copyId={key}
