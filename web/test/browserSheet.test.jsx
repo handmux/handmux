@@ -53,6 +53,7 @@ const browser = (overrides = {}) => ({
 });
 
 beforeEach(() => {
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -63,6 +64,7 @@ afterEach(async () => {
   container.remove();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const staticPreview = (overrides = {}) => ({
@@ -84,6 +86,20 @@ const render = (model, preview) => act(() => root.render(
   <BrowserSheet browser={model} staticPreview={preview} />,
 ));
 const click = (node) => act(() => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+const mockBrowserSize = (initialWidth) => {
+  let width = initialWidth;
+  let resize = () => {};
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
+    return this.classList.contains('browser-content') ? width : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback) { resize = callback; }
+    observe() {}
+    disconnect() {}
+  });
+  return (next) => act(() => { width = next; resize(); });
+};
 const selectMode = (index) => {
   const trigger = document.querySelector('.browser-mode-switch');
   if (trigger.getAttribute('aria-expanded') !== 'true') click(trigger);
@@ -472,6 +488,53 @@ describe('BrowserSheet', () => {
     await render(model, staticPreview({ selected: true, shownPreview: firstTab, tabs: [firstTab, secondTab] }));
     expect(document.querySelector('iframe[data-static-tab-name="main-3"]')).toBe(first);
     expect(document.querySelector('iframe[data-static-tab-name="docs-4"]')).toBe(second);
+  });
+
+  it.each([320, 390, 430, 767, 768, 1024, 1280, 1440])('fits the available %ipx width and chooses the initial mode at 768px', async (width) => {
+    mockBrowserSize(width);
+    await render(browser());
+    const frame = document.querySelector('.browser-pane.active .browser-frame');
+    const layoutWidth = width >= 768 ? Math.max(1280, width) : width;
+    expect(document.querySelector('.browser-content').classList.contains(width >= 768 ? 'wide' : 'narrow')).toBe(true);
+    expect(frame.style.width).toBe(`${layoutWidth}px`);
+    expect(frame.style.transform).toBe(`scale(${width / layoutWidth})`);
+    expect(frame.parentElement.style.width).toBe(`${width}px`);
+  });
+
+  it('preserves forced wide layout, zoom, and iframe identity across resizing and reopening', async () => {
+    const resize = mockBrowserSize(430);
+    const model = browser();
+    await render(model);
+    click(document.querySelector('button[aria-label="网页预览器菜单"]'));
+    click(document.querySelectorAll('.browser-width-row button')[1]);
+    const frame = document.querySelector('.browser-pane.active .browser-frame');
+    expect(frame.style.width).toBe('1280px');
+    expect(frame.style.transform).toBe(`scale(${430 / 1280})`);
+    click(document.querySelector('.browser-zoom-stepper button[aria-label="放大"]'));
+    expect(frame.style.transform).toBe(`scale(${430 / 1280 * 1.1})`);
+    expect(frame.parentElement.style.width).toBe('473px');
+    resize(600);
+    expect(frame.style.width).toBe('1280px');
+    expect(frame.style.transform).toBe(`scale(${600 / 1280 * 1.1})`);
+    await render({ ...model, open: false });
+    await render(model);
+    expect(document.querySelector('.browser-pane.active .browser-frame')).toBe(frame);
+    expect(frame.style.width).toBe('1280px');
+  });
+
+  it('keeps manual narrow mode and follows actual width after desktop resize', async () => {
+    const resize = mockBrowserSize(1440);
+    await render(browser());
+    click(document.querySelector('button[aria-label="网页预览器菜单"]'));
+    click(document.querySelectorAll('.browser-width-row button')[0]);
+    resize(430);
+    const frame = document.querySelector('.browser-pane.active .browser-frame');
+    expect(frame.style.width).toBe('430px');
+    expect(frame.style.transform).toBe('scale(1)');
+    resize(1440);
+    expect(document.querySelector('.browser-content').classList.contains('narrow')).toBe(true);
+    expect(frame.style.width).toBe('1440px');
+    expect(frame.style.transform).toBe('scale(1)');
   });
 
   it('keeps fine-grained page zoom controls in the menu without blocking webpage interaction', async () => {

@@ -14,6 +14,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Fixed
 
+- 修复网页预览窄屏未用满屏幕、电脑默认窄屏的问题；保留强制宽屏，并在大窗口使用实际宽度而不自动放大。
+
 - 修复已到期设备仍占用名称的问题，并补齐终端授权和改名时的重名提示。
 
 - 修复检测到新构建后终端模式不显示刷新提示、需切换到对话模式才出现的问题。

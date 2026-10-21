@@ -128,7 +128,8 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
   const modeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const [timeOpen, setTimeOpen] = useState(false);
-  const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>('narrow');
+  const [pageWidth, setPageWidth] = useState<'narrow' | 'wide'>(() => window.innerWidth >= 768 ? 'wide' : 'narrow');
+  const widthInitialized = useRef(false);
   const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
   const [loadedTabs, setLoadedTabs] = useState(() => new Set<string>());
   const [refreshingTabs, setRefreshingTabs] = useState(() => new Set<string>());
@@ -360,19 +361,24 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     ));
   }, [staticPreview?.tabs]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!open || !body) return undefined;
-    const measure = () => setBodySize({
-      width: body.clientWidth,
-      height: body.clientHeight,
-    });
+    const measure = () => {
+      const width = body.clientWidth;
+      if (width <= 0) return;
+      if (!widthInitialized.current) {
+        widthInitialized.current = true;
+        setPageWidth(width >= 768 ? 'wide' : 'narrow');
+      }
+      setBodySize({ width, height: body.clientHeight });
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(measure);
     observer.observe(body);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, consentOpen]);
 
   const postTabCommand = useCallback((
     tab: RuntimeBrowserTab | null,
@@ -609,12 +615,9 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
     if (direction > 0) return PAGE_ZOOM_STEPS.find((value) => value > current) || current;
     return [...PAGE_ZOOM_STEPS].reverse().find((value) => value < current) || current;
   });
-  const previewWidth = pageWidth === 'wide' ? 1280 : 390;
-  const previewScale = bodySize.width > 0
-    ? (pageWidth === 'wide'
-      ? bodySize.width / previewWidth
-      : Math.min(1, bodySize.width / previewWidth))
-    : 1;
+  const availableWidth = bodySize.width || window.innerWidth;
+  const previewWidth = pageWidth === 'wide' ? Math.max(1280, availableWidth) : availableWidth;
+  const previewScale = Math.min(1, availableWidth / previewWidth);
   const scalerStyleFor = (zoom: number): CSSProperties => {
     const scaledWidth = Math.round(previewWidth * previewScale * zoom * 1000) / 1000;
     const scaledHeight = Math.round(bodySize.height * zoom * 1000) / 1000;
@@ -822,9 +825,9 @@ export default function BrowserSheet({ browser, staticPreview }: BrowserSheetPro
                 <strong>{t('browser.pageWidth')}</strong>
                 <div className="browser-view-segment" role="group" aria-label={t('browser.viewMode')}>
                   <button aria-pressed={pageWidth === 'narrow'}
-                    onClick={() => setPageWidth('narrow')}>{t('browser.narrowWidth')}</button>
+                    onClick={() => { widthInitialized.current = true; setPageWidth('narrow'); }}>{t('browser.narrowWidth')}</button>
                   <button aria-pressed={pageWidth === 'wide'}
-                    onClick={() => setPageWidth('wide')}>{t('browser.wideWidth')}</button>
+                    onClick={() => { widthInitialized.current = true; setPageWidth('wide'); }}>{t('browser.wideWidth')}</button>
                 </div>
               </div>
 
