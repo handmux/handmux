@@ -2,7 +2,7 @@ import { useScheduledMessagesSnapshot } from '../hooks/useScheduledMessagesSnaps
 import ScheduledMessagesSheet from './ScheduledMessagesSheet.js';
 import type { AgentRunRef } from '../agentCatalog.js';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUpIcon, GearIcon, PlusIcon, StopIcon, AlarmClockIcon } from './icons.jsx';
+import { ArrowUpIcon, GearIcon, PlusIcon, StopIcon, ClockIcon } from './icons.jsx';
 import { t } from '../i18n';
 import {
   ConversationSendError,
@@ -342,7 +342,7 @@ function AgentConversationComposer({
         {tmuxSession && paneId && (conversation.descriptor === null || canSend) && <div className="quick-fixed"><button type="button" disabled={!canSend}
           className={`quick-fix scheduled-shortcut ${scheduledExceptions ? 'scheduled-shortcut-alert' : scheduledCount > 0 ? 'scheduled-shortcut-active' : 'scheduled-shortcut-neutral'}`}
           aria-label={scheduledLabel} onClick={() => { ref.current?.blur(); setScheduledOpen(scheduledScopeKey); }}>
-          <AlarmClockIcon /><span>{t('scheduled.shortcut')}</span>{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
+          <ClockIcon /><span>{t('scheduled.shortcut')}</span>{scheduledCount > 0 && <span className="scheduled-shortcut-count" aria-hidden="true">{scheduledCount}</span>}
         </button></div>}
         <div className="quick-scroll">
         {quickReplies.map((item, index) => (
