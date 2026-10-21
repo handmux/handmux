@@ -449,10 +449,12 @@ export function agentRoutes({ runtime }: { runtime: AgentFacadeRuntime }): expre
         throw new ScheduledError('Choose the current pane and Agent session', 'conflict');
       switch (body.action) {
         case 'create': return res.json(service.create(target as Awaited<ReturnType<NonNullable<typeof runtime.scheduledTarget>>>, body.request));
+        case 'trigger':
         case 'update':
         case 'delete':
         case 'exception': {
           if (!text(body.id, 256) || !Number.isSafeInteger(body.revision)) throw new ScheduledError('Invalid scheduled message revision');
+          if (body.action === 'trigger') return res.json(await service.trigger(scope, body.id, body.revision as number));
           if (body.action === 'update') return res.json(service.update(scope, body.id, body.revision as number, body.request));
           if (body.action === 'delete') return res.json(service.remove(scope, body.id, body.revision as number));
           return res.json(service.resolveException(scope, body.id, body.revision as number, body.request));

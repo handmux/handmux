@@ -1,5 +1,9 @@
 // 한국어 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.sendNow": "지금 전송",
+"scheduled.triggerOnce": "한 번 수동 전송",
+"scheduled.copy": "복사",
+
 "scheduled.shortcut": "예약",
 "scheduled.status": "상태",
 "scheduled.pending": "전송 대기",

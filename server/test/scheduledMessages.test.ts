@@ -256,3 +256,90 @@ describe('pane-owned scheduled records', () => {
     expect(() => h.service.snapshot({ tmuxSession: 'work' } as typeof scope)).toThrow();
   });
 });
+
+describe('explicit scheduled task trigger', () => {
+  it.each(['once', 'daily'] as const)('submits %s manually with explicit-user semantics and preserves the right schedule', async frequency => {
+    const calls: boolean[] = []; const now = Date.parse('2026-10-20T00:00:00Z');
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async (_target, _text, _id, recurring) => { calls.push(recurring); return { status: 'queued' }; } });
+    const task = service.create(target, { text: 'manual', frequency, slots: frequency === 'once' ? [{ date: '2026-10-21', time: '09:00' }] : [{ time: '09:00' }], endsAt: '2026-10-22T00:00:00Z' });
+    const paused = service.update(scope, task.id, task.revision, { enabled: false });
+    await service.trigger(scope, task.id, paused.revision);
+    const result = service.snapshot(scope).tasks[0]!;
+    expect(calls).toEqual([false]); expect(result.lastResult).toBe('submitted');
+    expect(result.enabled).toBe(false);
+    if (frequency === 'once') expect(result).toMatchObject({ state: 'ended', nextAt: null });
+    else expect(result).toMatchObject({ state: 'active', nextAt: task.nextAt, cursor: task.cursor });
+  });
+  it('holds a durable claim across clients and ticks, rejects blocked triggers, and waits during shutdown', async () => {
+    let release!: (value: { status: string }) => void; let calls = 0;
+    const store = new MemoryScheduledStore(); const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => Date.parse('2026-10-20T00:00:00Z'), deliver: async () => { calls++; return await new Promise(resolve => { release = resolve; }); } });
+    const task = service.create(target, { text: 'once', frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] });
+    const pending = service.trigger(scope, task.id, task.revision);
+    const claimed = service.snapshot(scope).tasks[0]!; expect(claimed.claim).toBeTruthy(); expect(claimed.immediateAt).toBeDefined();
+    await expect(service.trigger(scope, task.id, claimed.revision)).rejects.toThrow();
+    await expect(service.trigger({ ...scope, paneId: '%2' }, task.id, claimed.revision)).rejects.toThrow();
+    await service.tick(); expect(calls).toBe(1);
+    let closed = false; const closing = service.close().then(() => { closed = true; });
+    await Promise.resolve(); expect(closed).toBe(false);
+    await expect(service.trigger(scope, task.id, claimed.revision)).rejects.toThrow();
+    release({ status: 'queued' }); await pending; await closing; expect(closed).toBe(true);
+  });
+  it.each(['queue_full', 'target_changed'])('does not complete a rejected manual occurrence (%s)', async reason => {
+    const now = Date.parse('2026-10-20T00:00:00Z');
+    const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now, deliver: async () => ({ status: 'rejected', reason }) });
+    const task = service.create(target, { text: 'manual', frequency: 'daily', slots: [{ time: '09:00' }], endsAt: '2026-10-22T00:00:00Z' });
+    await expect(service.trigger(scope, task.id, task.revision)).rejects.toThrow();
+    expect(service.snapshot(scope).tasks[0]).toMatchObject({ state: 'active', nextAt: task.nextAt, cursor: task.cursor, lastResult: reason });
+    expect(service.snapshot(scope).exceptions[0]).toMatchObject({ reason, unknown: false });
+  });
+  it.each(['once', 'daily'] as const)('retains manual %s intent across a claimed crash and accepted reconciliation', async frequency => {
+    const now = Date.parse('2026-10-20T00:00:00Z'); const store = new MemoryScheduledStore(); let release!: (value: { status: string }) => void; let id = '';
+    const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async (_target, _text, value) => { id = value; return await new Promise(resolve => { release = resolve; }); } });
+    const task = service.create(target, { text: 'manual', frequency, slots: frequency === 'once' ? [{ date: '2026-10-21', time: '09:00' }] : [{ time: '09:00' }], endsAt: '2026-10-22T00:00:00Z' });
+    const pending = service.trigger(scope, task.id, task.revision);
+    let settled = false;
+    const restored = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver: async () => { throw Error('must not resend'); }, reconcile: async (_target, value) => { expect(value).toBe(id); return settled ? { status: 'accepted' } : null; } });
+    expect(restored.snapshot(scope).tasks[0]!.blocked).toBe(true);
+    await expect(restored.trigger(scope, task.id, restored.snapshot(scope).tasks[0]!.revision)).rejects.toThrow();
+    await restored.tick(); expect(restored.snapshot(scope).tasks[0]!.blocked).toBe(true);
+    settled = true; await restored.tick();
+    const current = restored.snapshot(scope).tasks[0]!;
+    expect(current.blocked).toBeUndefined(); expect(restored.snapshot(scope).exceptions).toHaveLength(0);
+    expect(current.state).toBe(frequency === 'once' ? 'ended' : 'active'); expect(current.enabled).toBe(false);
+    if (frequency === 'daily') expect(current.nextAt).toBe(task.nextAt);
+    release({ status: 'unknown' }); await expect(pending).rejects.toThrow(); await service.close(); await restored.close();
+  });
+});
+
+it('keeps an enabled recurrence running, separates same-clock manual IDs, and reconciles an actual unknown receipt', async () => {
+  let now = Date.parse('2026-10-20T00:00:00Z'); let outcome = 'queued'; let settled = false;
+  const calls: Array<{ id: string; recurring: boolean }> = [];
+  const service = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => now,
+    deliver: async (_target, _text, id, recurring) => { calls.push({ id, recurring }); return { status: outcome }; }, reconcile: async () => settled ? { status: 'accepted' } : null });
+  const original = service.create(target, { text: 'repeat', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' });
+  await service.trigger(scope, original.id, original.revision);
+  let current = service.snapshot(scope).tasks[0]!;
+  await service.trigger(scope, current.id, current.revision); current = service.snapshot(scope).tasks[0]!;
+  expect(current).toMatchObject({ enabled: true, state: 'active', nextAt: original.nextAt, cursor: original.cursor });
+  expect(new Set(calls.map(call => call.id)).size).toBe(2);
+  now += 60000; await service.tick(); expect(calls.map(call => call.recurring)).toEqual([false, false, true]);
+  current = service.snapshot(scope).tasks[0]!; const next = current.nextAt;
+  outcome = 'unknown'; await expect(service.trigger(scope, current.id, current.revision)).rejects.toThrow(/uncertain/);
+  expect(service.snapshot(scope).tasks[0]).toMatchObject({ enabled: false, blocked: true, state: 'active', nextAt: next });
+  settled = true; await service.tick();
+  expect(service.snapshot(scope).tasks[0]).toMatchObject({ enabled: false, state: 'active', nextAt: next, lastResult: 'submitted' });
+  expect(service.snapshot(scope).tasks[0]!.blocked).toBeUndefined(); await service.close();
+});
+
+it('never reuses manual identities after an automatic occurrence, clock rollback or reload', async () => {
+  let now = Date.parse('2026-10-20T00:00:00Z'); const store = new MemoryScheduledStore(); const ids: string[] = [];
+  const deliver = async (_target: unknown, _text: string, id: string) => { ids.push(id); return { status: 'queued' }; };
+  const service = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver });
+  const task = service.create(target, { text: 'identities', frequency: 'hourly', slots: [{ minute: 1 }], endsAt: '2026-10-21T00:00:00Z' });
+  const manual = async (scheduler = service) => { const current = scheduler.snapshot(scope).tasks[0]!; await scheduler.trigger(scope, current.id, current.revision); };
+  now += 60000; await manual(); await manual(); await service.tick(); await manual();
+  now -= 60000; await manual();
+  const restored = new ScheduledMessagesService({ store, timeZone: 'UTC', now: () => now, deliver }); await manual(restored);
+  expect(ids).toHaveLength(6); expect(new Set(ids).size).toBe(6);
+  expect(service.snapshot(scope).tasks[0]!.id).toBe(task.id); await service.close(); await restored.close();
+});

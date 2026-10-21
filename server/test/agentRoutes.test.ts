@@ -959,3 +959,20 @@ describe('scheduled facade pane scope', () => {
     expect((await request(client).post('/agents/scheduled-messages').send({ action: 'update', ...scope, id: snapshot.body.tasks[0].id, revision: snapshot.body.tasks[0].revision, request: { enabled: false } })).status).toBe(200);
   });
 });
+
+describe('scheduled manual trigger facade', () => {
+  it('submits the existing scoped task, uses revision protection and reports delivery rejection', async () => {
+    const h = runtime(); const scope = { tmuxSession: 'work', paneId: '%1' }; let outcome = 'queued'; let sends = 0;
+    const scheduler = new ScheduledMessagesService({ store: new MemoryScheduledStore(), timeZone: 'UTC', now: () => Date.parse('2026-10-20T00:00:00Z'), deliver: async () => { sends++; return outcome === 'queued' ? { status: outcome } : { status: 'rejected', reason: 'queue_full' }; } });
+    Object.assign(h.value, { scheduledMessages: scheduler }); h.value.scheduledTarget = async () => { throw Error('must use persisted target'); };
+    const target = { ...scope, agentId: 'pi', sessionId: 'original' };
+    const task = scheduler.create(target, { text: 'manual', frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] });
+    const client = app(h.value);
+    const cross = await request(client).post('/agents/scheduled-messages').send({ ...scope, paneId: '%2', action: 'trigger', id: task.id, revision: task.revision }); expect(cross.status).toBe(404); expect(sends).toBe(0);
+    const sent = await request(client).post('/agents/scheduled-messages').send({ ...scope, action: 'trigger', id: task.id, revision: task.revision }); expect(sent.status).toBe(200); expect(sent.body.status).toBe('submitted'); expect(scheduler.snapshot(scope).tasks[0]!.state).toBe('ended');
+    expect((await request(client).post('/agents/scheduled-messages').send({ ...scope, action: 'trigger', id: task.id, revision: task.revision })).status).toBe(409); expect(sends).toBe(1);
+    const other = scheduler.create(target, { text: 'failed', frequency: 'once', slots: [{ date: '2026-10-21', time: '09:00' }] }); outcome = 'full';
+    const rejected = await request(client).post('/agents/scheduled-messages').send({ ...scope, action: 'trigger', id: other.id, revision: other.revision }); expect(rejected.status).toBe(409); expect(rejected.body.error).toMatch(/Queue is full/);
+    expect(scheduler.snapshot(scope).tasks.find(task => task.id === other.id)!.state).toBe('active'); await scheduler.close();
+  });
+});

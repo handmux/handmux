@@ -187,16 +187,18 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     setEditor((current) => current ? { ...current, ...update } : current);
     setDirty(true);
   };
-  const edit = (task?: ScheduledTask, exception?: ScheduledException) => {
+  const edit = (task?: ScheduledTask, exception?: ScheduledException, copyText?: string) => {
     if (!snapshot) return;
     const timeZone = task?.timeZone ?? exception?.timeZone ?? snapshot.timeZone;
     setEditor({
       ...(task ? { task } : {}), ...(exception ? { exception } : {}),
-      text: task?.text ?? exception?.text ?? '', frequency: task?.rule.frequency ?? 'once',
+      text: task?.text ?? exception?.text ?? copyText ?? '', frequency: task?.rule.frequency ?? 'once',
       slots: task ? structuredClone(task.rule.slots) : scheduledOnceDefault(snapshot.serverNow, timeZone),
       endsAtLocal: task?.rule.endsAt ? scheduledLocalInput(Date.parse(task.rule.endsAt), timeZone) : '',
     });
-    setDropdown(null); setDirty(false); setError(''); enter('editor');
+    setDropdown(null); setDirty(copyText !== undefined); setError('');
+    if (copyText !== undefined && page === 'detail') replacePages(['list', 'editor']);
+    else enter('editor');
   };
   const chooseFrequency = (frequency: ScheduledRule['frequency']) => {
     setDropdown(null);
@@ -234,16 +236,19 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     else void mutate('create', { request: { ...rule, text: editor.text } }, returnToList);
   };
 
-  const confirmDelete = (task: ScheduledTask) => showConfirm({
-    message: t(task.state === 'ended' ? 'scheduled.clearRecordConfirm' : 'scheduled.deleteConfirm'), label: t('scheduled.delete'),
-    action: () => { void mutate('delete', { id: task.id, revision: task.revision }); },
-  });
-
   const menuActions = menu?.kind === 'task' ? [
     ...(menu.item.state === 'active' ? [{
+      key: 'trigger', label: t(menu.item.rule.frequency === 'once' ? 'scheduled.sendNow' : 'scheduled.triggerOnce'),
+      disabled: saving || menu.item.blocked === true || !!menu.item.claim,
+      onClick: () => { const task = menu.item; closeMenu(); void mutate('trigger', { id: task.id, revision: task.revision }, page === 'detail' ? returnToList : undefined); },
+    }, {
       key: 'enabled', label: t(menu.item.enabled ? 'scheduled.pause' : 'scheduled.resume'),
       disabled: saving || menu.item.blocked === true,
       onClick: () => { const task = menu.item; closeMenu(); void mutate('update', { id: task.id, revision: task.revision, request: { enabled: !task.enabled } }); },
+    }] : []),
+    ...(menu.item.state === 'ended' ? [{
+      key: 'copy', label: t('scheduled.copy'), disabled: saving || !run || !snapshot,
+      onClick: () => { const text = menu.item.text; closeMenu(); edit(undefined, undefined, text); },
     }] : []),
     {
       key: 'delete', label: t('scheduled.delete'), danger: true, confirm: true,
@@ -283,7 +288,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
         const metadata = exception ? `${dateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
           : `${dateTime(task!.state === 'ended' ? task!.endedAt : task!.nextAt, task!.timeZone)} · ${task!.state === 'ended'
             ? resultText(task!.lastResult ?? 'submitted') : t(`scheduled.${task!.rule.frequency}`)}`;
-        const action = isException ? 'reschedule' : task!.state === 'ended' ? 'delete' : 'edit';
+        const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
         return <li className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`} key={`${selection.kind}:${item.id}`}>
           <button type="button" className="scheduled-list-main" onClick={() => showDetail(selection)}>
             <span className="scheduled-list-copy">
@@ -291,10 +296,10 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
               <span className="scheduled-list-line scheduled-list-meta"><StatusBadge selection={selection} /><span className="scheduled-list-meta-copy">{metadata}</span></span>
             </span>
           </button>
-          <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
-            onClick={() => action === 'delete' ? confirmDelete(task!) : edit(task ?? undefined, exception ?? undefined)}>{t(action === 'edit' ? 'scheduled.editAction' : `scheduled.${action}`)}</button>
-          {action !== 'delete' && <button type="button" className="scheduled-more" aria-label={t('scheduled.more')}
-            disabled={saving} onClick={() => openMenu(selection)}><MoreHorizontalIcon /></button>}
+          {action !== 'more' && <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown}
+            onClick={() => edit(task ?? undefined, exception ?? undefined)}>{t(action === 'edit' ? 'scheduled.editAction' : `scheduled.${action}`)}</button>}
+          <button type="button" className="scheduled-more" aria-label={t('scheduled.more')}
+            disabled={saving} onClick={() => openMenu(selection)}><MoreHorizontalIcon /></button>
         </li>;
       })}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
     </div>

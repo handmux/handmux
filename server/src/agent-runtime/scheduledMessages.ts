@@ -13,7 +13,7 @@ export interface ScheduledTask {
   id: string; revision: number; target: ScheduledTarget; text: string; rule: ScheduledRule;
   timeZone: string; enabled: boolean; state: 'active' | 'ended' | 'exception'; createdAt: number;
   cursor: number; nextAt: number | null; endedAt?: number; lastAt?: number; lastResult?: string;
-  claim?: { at: number; text: string; target: ScheduledTarget }; blocked?: boolean; blockedAt?: number;
+  claim?: { at: number; text: string; target: ScheduledTarget }; blocked?: boolean; blockedAt?: number; immediateAt?: number; manualCursor?: number;
 }
 export interface ScheduledException {
   id: string; revision: number; taskId: string; target: ScheduledTarget; text: string; timeZone: string;
@@ -128,6 +128,7 @@ export class ScheduledMessagesService {
   #state: State;
   #running: Promise<void> | undefined;
   #closed = false;
+  #manual = new Set<Promise<{ status: 'submitted' }>>();
   readonly #store: ScheduledStore;
   readonly #now: () => number;
   readonly timeZone: string;
@@ -170,6 +171,29 @@ export class ScheduledMessagesService {
       task.revision++; return task;
     });
   }
+  trigger(scope: ScheduledScope, id: string, revision: number): Promise<{ status: 'submitted' }> {
+    const operation = (async () => {
+      if (this.#closed) throw new ScheduledError('Scheduled messages are stopping', 'conflict');
+      const task = this.#transaction(() => {
+        const task = this.#task(scope, id, revision);
+        if (task.state !== 'active' || task.claim || task.blocked) throw new ScheduledError('This task is submitting, uncertain or has ended. Reload the list.', 'conflict');
+        const at = Math.max(this.#now(), (task.manualCursor ?? -Infinity) + 1);
+        task.manualCursor = at; task.immediateAt = at; task.lastAt = at;
+        task.claim = { at, text: task.text, target: structuredClone(task.target) }; task.revision++;
+        return task;
+      });
+      const receipt = await this.#submitClaim(task);
+      if (!receipt || !['queued', 'accepted'].includes(receipt.status)) throw new ScheduledError(
+        receipt?.status === 'unknown' ? 'Delivery is uncertain. Check conversation and Queue before trying again.'
+          : receipt?.reason === 'queue_full' ? 'Queue is full. Free a slot and try again.'
+            : receipt?.reason === 'target_changed' ? 'The target session changed. Check the conversation before trying again.'
+              : 'Message was not submitted. Check the conversation and try again.', 'conflict');
+      return { status: 'submitted' as const };
+    })();
+    this.#manual.add(operation);
+    void operation.finally(() => { this.#manual.delete(operation); }).catch(() => {});
+    return operation;
+  }
   remove(scope: ScheduledScope, id: string, revision: number) { return this.#transaction(() => { const task = this.#task(scope, id, revision); this.#state.tasks = this.#state.tasks.filter((item) => item !== task); return { ok: true }; }); }
   resolveException(scope: ScheduledScope, id: string, revision: number, raw: unknown) {
     requiredScope(scope);
@@ -185,11 +209,11 @@ export class ScheduledMessagesService {
     });
   }
   #exception(task: ScheduledTask, at: number, reason: string, unknown = false, text = task.text, count?: number) {
-    const id = `${task.id}:${at}`;
+    const id = `${task.id}:${task.immediateAt === at ? 'immediate:' : ''}${at}`;
     if (!this.#state.exceptions.some((item) => item.id === id)) this.#state.exceptions.push({ id, revision: 1, taskId: task.id, target: structuredClone(task.target), text, timeZone: task.timeZone, scheduledAt: at, reason, unknown, ...(count ? { count } : {}) });
   }
   tick(): Promise<void> { if (this.#closed) return Promise.resolve(); if (this.#running) return this.#running; const operation = this.#tick(); this.#running = operation; return operation.finally(() => { if (this.#running === operation) this.#running = undefined; }); }
-  async close() { this.#closed = true; await this.#running; }
+  async close() { this.#closed = true; await Promise.allSettled([this.#running, ...this.#manual]); }
   async #tick() {
     for (const id of this.#state.tasks.map((task) => task.id)) {
       if (this.#closed) return;
@@ -197,11 +221,13 @@ export class ScheduledMessagesService {
       if (!task) continue;
       if (task.blocked && task.blockedAt !== undefined && this.#reconcile) {
         let receipt: ScheduledDelivery | null = null;
-        try { receipt = await this.#reconcile(task.target, `scheduled:${task.id}:${task.blockedAt}`); } catch { /* uncertainty remains visible */ }
+        try { receipt = await this.#reconcile(task.target, `scheduled:${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`); } catch { /* uncertainty remains visible */ }
         if (receipt && ['accepted', 'queued'].includes(receipt.status)) {
           this.#transaction(() => {
-            this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== `${task.id}:${task.blockedAt}`);
-            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; task.revision++;
+            this.#state.exceptions = this.#state.exceptions.filter((item) => item.id !== `${task.id}:${task.immediateAt === task.blockedAt ? 'immediate:' : ''}${task.blockedAt}`);
+            const manual = task.immediateAt === task.blockedAt;
+            delete task.blocked; delete task.blockedAt; task.lastResult = 'submitted'; if (task.rule.frequency === 'once') task.state = task.nextAt !== null ? 'active' : this.#state.exceptions.some((item) => item.taskId === task.id) ? 'exception' : 'ended'; if (manual && task.rule.frequency === 'once') { task.state = 'ended'; task.nextAt = null; task.endedAt = this.#now(); }
+            delete task.immediateAt; task.revision++;
           });
         }
       }
@@ -262,13 +288,14 @@ export class ScheduledMessagesService {
 
     }
   }
-  async #submitClaim(task: ScheduledTask): Promise<void> {
+  async #submitClaim(task: ScheduledTask): Promise<ScheduledDelivery | undefined> {
       const claim = structuredClone(task.claim as ScheduledTask['claim']);
       if (!claim) return;
+      const manual = task.immediateAt === claim.at;
       let receipt: ScheduledDelivery;
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
-        try { receipt = await Promise.race([this.#deliver(claim.target, claim.text, `scheduled:${task.id}:${claim.at}`, task.rule.frequency !== 'once'), new Promise<ScheduledDelivery>((resolve) => { timer = setTimeout(() => resolve({ status: 'unknown', reason: 'delivery_unconfirmed' }), 25_000); timer.unref?.(); })]); }
+        try { receipt = await Promise.race([this.#deliver(claim.target, claim.text, `scheduled:${task.id}:${manual ? 'immediate:' : ''}${claim.at}`, !manual && task.rule.frequency !== 'once'), new Promise<ScheduledDelivery>((resolve) => { timer = setTimeout(() => resolve({ status: 'unknown', reason: 'delivery_unconfirmed' }), 25_000); timer.unref?.(); })]); }
         finally { if (timer) clearTimeout(timer); }
       }
       catch { receipt = { status: 'unknown', reason: 'delivery_unconfirmed' }; }
@@ -277,13 +304,16 @@ export class ScheduledMessagesService {
         const current = this.#state.tasks.find((item) => item.id === task.id);
         task = current ?? task;
         const successful = receipt.status === 'accepted' || receipt.status === 'queued';
-        const skipped = task.rule.frequency !== 'once' && ['duplicate_queued', 'queue_full'].includes(receipt.reason ?? '');
+        const skipped = !manual && task.rule.frequency !== 'once' && ['duplicate_queued', 'queue_full'].includes(receipt.reason ?? '');
         task.lastResult = successful ? 'submitted' : skipped ? receipt.reason! : receipt.reason ?? receipt.status;
         if (!successful && !skipped) { this.#exception(task, claim.at, receipt.reason ?? receipt.status, receipt.status === 'unknown', claim.text); if (task.rule.frequency === 'once' && task.nextAt === null) task.state = 'exception'; }
         if (receipt.status === 'unknown') { task.blocked = true; task.blockedAt = claim.at; task.enabled = false; }
         if (receipt.reason === 'target_changed') task.enabled = false;
+        if (manual && successful && task.rule.frequency === 'once') { task.state = 'ended'; task.enabled = false; task.nextAt = null; task.endedAt = this.#now(); }
+        if (manual && receipt.status !== 'unknown') delete task.immediateAt;
         delete task.claim; task.revision++;
       });
+      return receipt;
   }
 
 }

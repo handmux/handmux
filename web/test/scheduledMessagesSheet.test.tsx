@@ -72,7 +72,7 @@ it('uses two-line compact list rows in all tabs with explicit trailing actions a
     fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^scheduled\\.${tab}(?: |$)`) }));
     const row = screen.getByRole('listitem');
     expect(row.querySelector('.scheduled-list-copy')?.children).toHaveLength(2);
-    expect(within(row).getByRole('button', { name: `scheduled.${tab === 'active' ? 'editAction' : tab === 'ended' ? 'delete' : 'reschedule'}` })).toBeTruthy();
+    expect(within(row).getByRole('button', { name: `scheduled.${tab === 'active' ? 'editAction' : tab === 'ended' ? 'more' : 'reschedule'}` })).toBeTruthy();
     expect(container.textContent).not.toContain(text);
     expect(container.textContent).not.toContain('hidden-session-uuid');
   }
@@ -139,18 +139,17 @@ it('hardware Back dirty confirmation cancellation retains the editor history lev
   await waitFor(() => expect(window.history.state?.depth).toBe(1));
   window.history.back(); await waitFor(() => expect(closed).toHaveBeenCalledOnce());
 });
-it('ends with a direct destructive confirmation rather than opening a second delete menu', async () => {
+it('uses one armed menu confirmation to delete an ended record from its trailing more action', async () => {
   const task: ScheduledTask = { id: 'ended', revision: 7, text: 'done', target, timeZone: 'UTC', state: 'ended', enabled: true, nextAt: null, endedAt: serverNow, rule: { frequency: 'once', slots: [{ date: '2026-10-20', time: '09:00' }] } };
   mockApi({ ...snapshot, tasks: [task] });
   render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.delete' }));
-  const dialog = screen.getByRole('alertdialog');
-  expect(dialog.textContent).toContain('scheduled.clearRecordConfirm');
-  expect(dialog.textContent).not.toContain('scheduled.deleteConfirm');
-  expect(screen.queryByRole('dialog', { name: 'scheduled.actions' })).toBeNull();
-  fireEvent.click(within(dialog).getByRole('button', { name: 'scheduled.delete' }));
-  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find((call) => call[2] === 'delete')?.[3]).toEqual({ id: 'ended', revision: 7 }));
+  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.more' }));
+  expect(screen.getByRole('button', { name: 'scheduled.copy' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.delete' }));
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.clearRecordConfirm' }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'delete')?.[3]).toEqual({ id: 'ended', revision: 7 }));
 });
 it('chooses weekly times independently and requires an explicit cutoff through grouped setting rows', async () => {
   mockApi(); render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />); await openNew();
@@ -399,4 +398,30 @@ it('counts active tasks including paused and blocked tasks and updates exception
   expect(screen.getByRole('tab', { name: 'scheduled.active 1' })).toBeTruthy();
   expect(screen.getByRole('tab', { name: 'scheduled.exceptions 0' })).toBeTruthy();
   expect(vi.mocked(scheduledRequest)).not.toHaveBeenCalled();
+});
+
+it.each(['once', 'daily'] as const)('offers the right %s manual action and submits the existing record without create/delete', async frequency => {
+  const task: ScheduledTask = { id: 'manual', revision: 3, text: 'trigger me', target, timeZone: 'UTC', state: 'active', enabled: true, nextAt: serverNow + 60000, rule: { frequency, slots: frequency === 'once' ? [{ date: '2026-10-21', time: '09:00' }] : [{ time: '09:00' }], endsAt: '2026-11-01T00:00:00Z' } };
+  mockApi({ ...snapshot, tasks: [task] });
+  render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'scheduled.more' }));
+  fireEvent.click(screen.getByRole('button', { name: frequency === 'once' ? 'scheduled.sendNow' : 'scheduled.triggerOnce' }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'trigger')?.[3]).toEqual({ id: task.id, revision: task.revision }));
+  expect(vi.mocked(scheduledRequest).mock.calls.some(call => ['create', 'delete'].includes(call[2]))).toBe(false);
+});
+it.each([false, true])('copies only an ended message body into a fresh once editor from detail=%s', async detail => {
+  const task: ScheduledTask = { id: 'copy-source', revision: 4, text: 'copy just this text', target: { ...target, sessionId: 'old' }, timeZone: 'UTC', state: 'ended', enabled: false, nextAt: null, endedAt: serverNow, rule: { frequency: 'daily', slots: [{ time: '09:00' }, { time: '18:00' }], endsAt: '2026-11-01T00:00:00Z' } };
+  mockApi({ ...snapshot, tasks: [task] });
+  const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' })); await screen.findByRole('listitem');
+  if (detail) fireEvent.click(container.querySelector('.scheduled-list-main')!);
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
+  expect(screen.queryByRole('button', { name: 'scheduled.sendNow' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.copy' }));
+  expect((screen.getByLabelText('scheduled.message') as HTMLTextAreaElement).value).toBe(task.text);
+  expect(vi.mocked(scheduledRequest).mock.calls.some(call => call[2] === 'create')).toBe(false);
+  await waitFor(() => expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.save' }));
+  await waitFor(() => expect(vi.mocked(scheduledRequest).mock.calls.find(call => call[2] === 'create')).toMatchObject([{ tmuxSession: 'work', paneId: '%1' }, run, 'create', { request: { text: task.text, frequency: 'once', slots: [{ date: '2026-10-21', time: '00:30' }] } }]));
+  expect(task.rule.frequency).toBe('daily');
 });

@@ -1,5 +1,9 @@
 // 日本語 strings. Missing keys fall back to English (see ./index.ts translate()).
 export default {
+"scheduled.sendNow": "今すぐ送信",
+"scheduled.triggerOnce": "手動で1回送信",
+"scheduled.copy": "コピー",
+
 "scheduled.shortcut": "予約",
 "scheduled.status": "状態",
 "scheduled.pending": "送信待ち",
