@@ -33,9 +33,9 @@ export function scheduledRuleComplete(rule: { frequency: ScheduledRule['frequenc
 }
 
 /** Fixed presentation of a server-zone calendar value; keep ISO values for native inputs/API. */
-export function scheduledDisplayLocal(value: string, includeYear = false): string {
+export function scheduledDisplayLocal(value: string, currentYear?: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(value);
-  return match ? `${includeYear ? `${match[1]}/` : ''}${match[2]}/${match[3]}${match[4] ? ` ${match[4]}` : ''}` : value;
+  return match ? `${currentYear && match[1] !== currentYear ? `${match[1]}/` : ''}${match[2]}/${match[3]}${match[4] ? ` ${match[4]}` : ''}` : value;
 }
 
 /** Scheduling is minute-granular: never truncate the one-minute recovery margin. */
@@ -53,10 +53,10 @@ export function scheduledRelativeTime(at: number, serverNow: number): string {
     .map(([count, unit]) => t(`scheduled.duration${unit}`, { count })).join(t('scheduled.durationSeparator'));
   return t('scheduled.inDuration', { duration });
 }
-export function scheduledRuleSummary(rule: ScheduledRule, includeFrequency = true): string {
-  if (rule.frequency === 'hourly') return rule.slots.map(slot => t(includeFrequency ? 'scheduled.hourlyMinute' : 'scheduled.minuteSlot', { minute: String(slot.minute ?? 0).padStart(2, '0') })).join(' / ');
+export function scheduledRuleSummary(rule: ScheduledRule, currentYear?: string): string {
+  if (rule.frequency === 'hourly') return rule.slots.map(slot => t('scheduled.hourlyMinute', { minute: String(slot.minute ?? 0).padStart(2, '0') })).join(' / ');
   const slots = [...rule.slots].sort((a, b) => (a.weekday ?? 0) - (b.weekday ?? 0));
-  return `${includeFrequency ? `${t(`scheduled.${rule.frequency}`)} ` : ''}${slots.map(slot => `${rule.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, true)} ` : ''}${slot.time ?? ''}`).join(' / ')}`;
+  return `${t(`scheduled.${rule.frequency}`)} ${slots.map(slot => `${rule.frequency === 'weekly' ? `${t(`scheduled.day.${slot.weekday}`)} ` : slot.date ? `${scheduledDisplayLocal(slot.date, currentYear)} ` : ''}${slot.time ?? ''}`).join(' / ')}`;
 }
 
 export function scheduledTaskTimeHint(task: ScheduledTask, serverNow: number): string {

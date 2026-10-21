@@ -103,12 +103,12 @@ it('shows one once timestamp with relative time and separates recurring frequenc
   const once: ScheduledTask = { ...task, rule: { frequency: 'once', slots: [{ date: '2026-10-20', time: '00:01' }] } };
   const view = setup(true, once); await screen.findByRole('listitem');
   const meta = view.container.querySelector('.scheduled-list-meta-copy')!.textContent!;
-  expect(meta.match(/2026\/10\/20 00:01/g)).toHaveLength(1);
+  expect(meta.match(/10\/20 00:01/g)).toHaveLength(1);
   expect(meta).toContain(`(${t('scheduled.nextExecution', { time: t('scheduled.inDuration', { duration: t('scheduled.durationMinutes', { count: 1 }) }) })})`);
   view.unmount();
   const cycle = setup(true); await screen.findByRole('listitem');
   expect(cycle.container.querySelector('.scheduled-frequency-badge')?.textContent).toBe(t('scheduled.hourly'));
-  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain('2026/10/20 00:01');
+  expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain('10/20 00:01');
   expect(cycle.container.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('每小时 01 分 (下次执行：1分钟后)');
 });
 it('labels expired paused once schedules and disables resume while normal editing stays paused', async () => {
@@ -229,3 +229,12 @@ async function pendingSave(failRestore = false) {
     },
   };
 }
+
+it.each(['once', 'daily'] as const)('puts the same paused badge at the lower left for %s schedules', async frequency => {
+  const view = setup(false, { ...task, rule: { frequency, slots: frequency === 'once' ? [{ date: '2026-10-20', time: '00:01' }] : [{ time: '09:30' }], endsAt: '2026-10-21T00:00:00Z' } });
+  const row = await screen.findByRole('listitem');
+  const meta = row.querySelector('.scheduled-list-meta')!;
+  expect(meta.firstElementChild?.textContent).toBe(t('scheduled.paused'));
+  expect(row.querySelector('.scheduled-list-summary .scheduled-status-paused')).toBeNull();
+  expect(view.container.querySelectorAll('.scheduled-status-paused')).toHaveLength(1);
+});

@@ -132,7 +132,7 @@ it('uses the latest clock for rescheduling after a memoized poll and the latest 
   fireEvent.click(screen.getByRole('tab', { name: /scheduled.exceptions/ }));
   view.rerenderSnapshot({ ...empty, serverNow: now + 86400000, tasks: [structuredClone(task)], exceptions: [structuredClone(exception)] });
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.reschedule' }));
-  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2026/10/21 16:30');
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('10/21 16:30');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.back' }));
   fireEvent.click(screen.getByRole('tab', { name: /scheduled.active/ }));
   view.rerenderSnapshot({ ...empty, tasks: [{ ...task, revision: 9, enabled: false }] });
@@ -147,4 +147,24 @@ it('disables a confirmed preview after shared server time reaches it without sch
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole('status').textContent).toBe('scheduled.chooseFuture');
   expect(vi.mocked(scheduledRequest).mock.calls.filter(call => call[2] === 'preview')).toHaveLength(1);
+});
+
+it('updates date years at the server year boundary without consulting the browser clock', () => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2000-01-01T00:00:00Z'));
+  const yearEnd = { ...empty, timeZone: 'Asia/Shanghai', serverNow: Date.parse('2026-12-31T15:59:59Z'), tasks: [{ ...task, state: 'ended' as const, endedAt: Date.parse('2026-12-31T15:50:00Z') }] };
+  const view = setup(yearEnd);
+  fireEvent.click(screen.getByRole('tab', { name: 'scheduled.ended' }));
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('12/31 15:50');
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).not.toContain('2026/');
+  view.rerenderSnapshot({ ...yearEnd, serverNow: Date.parse('2026-12-31T16:00:01Z') });
+  expect(view.container.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('2026/12/31 15:50');
+});
+
+it('closes the active-list menu when its task finishes instead of exposing ended-record deletion', async () => {
+  const view = setup({ ...empty, tasks: [task] });
+  fireEvent.click(screen.getByRole('button', { name: 'scheduled.more' }));
+  expect(screen.getByRole('dialog', { name: 'scheduled.actions' })).toBeTruthy();
+  view.rerenderSnapshot({ ...empty, tasks: [{ ...task, state: 'ended', endedAt: now, nextAt: null }] });
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'scheduled.actions' })).toBeNull());
+  expect(screen.queryByRole('button', { name: 'scheduled.delete' })).toBeNull();
 });

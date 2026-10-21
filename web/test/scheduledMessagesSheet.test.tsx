@@ -319,13 +319,13 @@ it('shows actionable feedback after a completed preview has no executable occurr
   expect((screen.getByRole('button', { name: 'scheduled.save' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it('shows an accessible add icon and year-qualified schedule dates while native pickers retain ISO values', async () => {
+it('shows an accessible add icon and current-year-free and cross-year schedule dates while native pickers retain ISO values', async () => {
   mockApi(); const { container } = render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   await screen.findByText('scheduled.empty');
   const add = screen.getByRole('button', { name: 'scheduled.add' });
   expect(add.textContent).toBe(''); expect(add.querySelector('svg')).toBeTruthy();
   fireEvent.click(add);
-  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2026/10/21 00:30');
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('10/21 00:30');
   fireEvent.click(screen.getByRole('button', { name: /scheduled.sendTime/ }));
   const date = screen.getByLabelText('scheduled.date') as HTMLInputElement;
   expect(date.type).toBe('date'); expect(date.value).toBe('2026-10-21');
@@ -333,7 +333,7 @@ it('shows an accessible add icon and year-qualified schedule dates while native 
   expect(time.type).toBe('time'); expect(time.closest('.scheduled-calendar-input')).toBeNull();
   expect(date.closest('.scheduled-confirmed-picker')).toBeTruthy();
   fireEvent.change(date, { target: { value: '2027-01-02' } });
-  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2026/10/21 00:30');
+  expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('10/21 00:30');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.confirm' }));
   expect(screen.getByRole('button', { name: /scheduled.sendTime/ }).textContent).toContain('2027/01/02 00:30');
   fireEvent.click(screen.getByRole('button', { name: /scheduled.cycle/ }));
@@ -345,7 +345,7 @@ it('shows an accessible add icon and year-qualified schedule dates while native 
   expect(cutoff.min).toBe('2026-10-20T23:30'); expect(cutoff.max).toBe('2027-10-20T23:30');
   fireEvent.click(screen.getByRole('button', { name: 'scheduled.confirm' }));
   expect(screen.getByRole('button', { name: /^scheduled.cutoff / }).textContent).toContain('2027/01/18 23:30');
-  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('scheduled.next: 2026/10/21 00:30 (scheduled.inDuration'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('scheduled.next: 10/21 00:30 (scheduled.inDuration'));
   expect(container.textContent).not.toContain('2027-01-18');
 });
 
@@ -371,7 +371,7 @@ it.each([true, false])('shows a single once time with relative time and without 
   render(<ScheduledMessagesSheet scope={{ tmuxSession: 'work', paneId: '%1' }} run={run} onClose={() => {}} />);
   const row = await screen.findByRole('listitem');
   const meta = row.querySelector('.scheduled-list-meta-copy')!.textContent!;
-  expect(meta.match(/2026\/10\/20 15:31/g)).toHaveLength(1);
+  expect(meta.match(/10\/20 15:31/g)).toHaveLength(1);
   expect(meta.includes('scheduled.inDuration')).toBe(enabled);
   expect(meta.includes('scheduled.pausedReference')).toBe(!enabled);
 });
@@ -384,7 +384,7 @@ it('shows a frequency badge, selected slots and next time with relative time in 
   expect(row.querySelector('.scheduled-frequency-badge')?.textContent).toBe('scheduled.weekly');
   expect(row.querySelector('.scheduled-list-meta-copy')?.textContent).toBe('scheduled.weekly scheduled.day.1 09:30 / scheduled.day.3 18:45 (scheduled.nextExecution scheduled.inDuration scheduled.durationMinutes 1)');
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
-  expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('2026/10/20 15:31');
+  expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('10/20 15:31');
   expect(container.querySelector('.scheduled-detail-content')?.textContent).toContain('scheduled.inDuration');
 });
 
@@ -414,9 +414,9 @@ it.each([
   if (state === 'ended') { expect(row.classList.contains('scheduled-state-ended')).toBe(true); expect(row.classList.contains('scheduled-state-exception')).toBe(false); }
   const copy = row.querySelector('.scheduled-list-copy')!;
   expect(copy.children).toHaveLength(2);
-  const badge = copy.querySelector('.scheduled-status-badge')!;
+  const badge = copy.children[1]!.querySelector(`.scheduled-status-${status}`)!;
   expect(badge.textContent).toContain(label); expect(badge.classList.contains(`scheduled-status-${status}`)).toBe(true);
-  if (state === 'active') { expect(badge.textContent).toContain('scheduled.daily'); expect(copy.children[1]!.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.daily'); }
+  if (state === 'active') { expect(copy.children[0]!.querySelector('.scheduled-frequency-badge')?.textContent).toBe('scheduled.daily'); expect(copy.children[1]!.querySelector('.scheduled-list-meta-copy')?.textContent).toContain('scheduled.daily'); }
   fireEvent.click(container.querySelector('.scheduled-list-main')!);
   const detailBadge = container.querySelector('.scheduled-page .scheduled-status-badge')!;
   expect(detailBadge.textContent).toBe(label); expect(detailBadge.classList.contains(`scheduled-status-${status}`)).toBe(true);

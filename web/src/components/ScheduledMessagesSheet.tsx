@@ -31,12 +31,14 @@ interface Confirmation { message: string; action: () => void; label?: string }
 
 function StatusBadge({ selection, showFrequency = false }: { selection: Selection; showFrequency?: boolean }) {
   const task = selection.kind === 'task' ? selection.item : null;
-  const recurring = showFrequency && task?.state === 'active' && task.rule.frequency !== 'once';
-  if (task?.state === 'active' && task.enabled && !task.blocked && !recurring) return null;
+  if (showFrequency && task?.state === 'active' && task.rule.frequency !== 'once') {
+    return <span className="scheduled-status-badge scheduled-status-frequency scheduled-frequency-badge">{t(`scheduled.${task.rule.frequency}`)}</span>;
+  }
+  if (task?.state === 'active' && task.enabled && !task.blocked) return null;
   const status = selection.kind === 'exception' || task?.state === 'exception' ? 'exception'
-    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : task?.enabled ? 'frequency' : 'paused';
+    : task?.state === 'ended' ? task.endedReason === 'terminated' ? 'terminated' : 'ended' : task?.blocked ? 'exception' : 'paused';
   const label = status === 'exception' ? 'scheduled.exception' : `scheduled.${status}`;
-  return <span className={`scheduled-status-badge scheduled-status-${status}${recurring ? ' scheduled-frequency-badge' : ''}`}>{recurring ? `${t(`scheduled.${task.rule.frequency}`)}${status === 'frequency' ? '' : ` · ${t(label)}`}` : t(label)}</span>;
+  return <span className={`scheduled-status-badge scheduled-status-${status}`}>{t(label)}</span>;
 }
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return <div className="settings-page-row settings-page-value-row">
@@ -45,8 +47,8 @@ function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   </div>;
 }
 
-function scheduleDateTime(at: number | undefined | null, timeZone: string): string {
-  return at == null ? '—' : scheduledDisplayLocal(scheduledLocalInput(at, timeZone), true);
+function scheduleDateTime(at: number | undefined | null, timeZone: string, currentYear: string): string {
+  return at == null ? '—' : scheduledDisplayLocal(scheduledLocalInput(at, timeZone), currentYear);
 }
 function resultText(reason: string): string {
   const key = `scheduled.result.${reason}`;
@@ -74,27 +76,27 @@ function sameRowSelection(left: Selection, right: Selection): boolean {
   return false;
 }
 interface ScheduledRowProps {
-  selection: Selection; timeHint: string; language: string; saving: boolean; pendingAction: string | undefined;
+  selection: Selection; timeHint: string; currentYear: string; language: string; saving: boolean; pendingAction: string | undefined;
   onDetail(key: SelectionKey): void; onEdit(key: SelectionKey): void; onMenu(key: SelectionKey): void;
 }
-const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, timeHint, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
+const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, timeHint, currentYear, saving, pendingAction, onDetail, onEdit, onMenu }: ScheduledRowProps) {
   const { item } = selection;
   const key = { kind: selection.kind, id: item.id };
   const isException = selection.kind === 'exception';
   const task = selection.kind === 'task' ? selection.item : null;
   const exception = selection.kind === 'exception' ? selection.item : null;
-  const at = task ? scheduleDateTime(task.state === 'ended' ? task.endedAt : task.nextAt, task.timeZone) : '';
+  const at = task ? scheduleDateTime(task.state === 'ended' ? task.endedAt : task.nextAt, task.timeZone, currentYear) : '';
   const next = `${at}${timeHint ? ` (${timeHint})` : ''}`;
   const recurring = task?.state === 'active' && task.rule.frequency !== 'once';
-  const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone)} · ${resultText(exception.reason)}`
+  const metadata = exception ? `${scheduleDateTime(exception.scheduledAt, exception.timeZone, currentYear)} · ${resultText(exception.reason)}`
     : task!.state === 'ended' ? `${at}${task!.endedReason === 'terminated' ? '' : ` · ${resultText(task!.lastResult ?? 'submitted')}`}`
-      : task!.rule.frequency === 'once' ? next : `${scheduledRuleSummary(task!.rule)}${timeHint ? ` (${timeHint})` : ''}`;
+      : task!.rule.frequency === 'once' ? next : `${scheduledRuleSummary(task!.rule, currentYear)}${timeHint ? ` (${timeHint})` : ''}`;
   const action = isException ? 'reschedule' : task!.state === 'ended' ? 'more' : 'edit';
   return <li aria-busy={!!pendingAction} className={`scheduled-list-row${task?.state === 'ended' ? ' scheduled-state-ended' : isException || task?.blocked ? ' scheduled-state-exception' : ''}`}>
     <button type="button" className="scheduled-list-main" onClick={() => onDetail(key)}>
       <span className="scheduled-list-copy">
         <span className={`scheduled-list-line scheduled-list-summary${recurring ? ' has-frequency' : ''}`}>{recurring ? <><span className="scheduled-list-summary-text">{scheduledSummary(item.text)}</span>{!pendingAction && <StatusBadge selection={selection} showFrequency />}</> : scheduledSummary(item.text)}</span>
-        <span className="scheduled-list-line scheduled-list-meta">{!!pendingAction ? <span className="scheduled-inline-status" role="status">{t(pendingAction === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : !recurring && <StatusBadge selection={selection} />}<span className="scheduled-list-meta-copy">{metadata}</span></span>
+        <span className="scheduled-list-line scheduled-list-meta">{!!pendingAction ? <span className="scheduled-inline-status" role="status">{t(pendingAction === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={selection} />}<span className="scheduled-list-meta-copy">{metadata}</span></span>
       </span>
     </button>
     {action !== 'more' && <button type="button" className="scheduled-row-action" disabled={saving || exception?.unknown || !!task?.claim}
@@ -103,7 +105,7 @@ const ScheduledMessageRow = memo(function ScheduledMessageRow({ selection, timeH
       disabled={saving} onClick={() => onMenu(key)}><MoreHorizontalIcon /></button>
   </li>;
 
-}, (a, b) => a.language === b.language && a.timeHint === b.timeHint && a.saving === b.saving && a.pendingAction === b.pendingAction
+}, (a, b) => a.language === b.language && a.timeHint === b.timeHint && a.currentYear === b.currentYear && a.saving === b.saving && a.pendingAction === b.pendingAction
   && a.onDetail === b.onDetail && a.onEdit === b.onEdit && a.onMenu === b.onMenu && sameRowSelection(a.selection, b.selection));
 
 export interface ScheduledMessageInitialDraft { text: string; sendAt?: number }
@@ -116,8 +118,10 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const fallback = useScheduledMessagesSnapshot(scope, controller === undefined);
   const source = controller ?? fallback;
   const snapshot = source.snapshot;
+  const currentYear = snapshot ? scheduledLocalInput(snapshot.serverNow, snapshot.timeZone).slice(0, 4) : '';
   const [tab, setTab] = useState<'active' | 'ended' | 'exceptions'>('active');
   const [pages, setPages] = useState<Page[]>(['list']);
+  const page = pages.at(-1)!;
   const [picker, setPicker] = useState<Picker | null>(null);
   const frequencyDrafts = useRef<Partial<Record<ScheduledRule['frequency'], { slots: ScheduledRule['slots']; endsAtLocal: string }>>>({});
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -129,7 +133,8 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     const item = snapshot.exceptions.find(item => item.id === key.id); return item ? { kind: 'exception', item } : null;
   };
   const detail = resolveSelection(detailKey);
-  const menu = resolveSelection(menuKey);
+  const menuSelection = resolveSelection(menuKey);
+  const menu = page === 'list' && menuSelection?.kind === 'task' && menuSelection.item.state !== tab ? null : menuSelection;
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [error, setError] = useState('');
@@ -166,7 +171,6 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const pendingHistoryDrop = useRef(0);
   runRef.current = run;
   pagesRef.current = pages;
-  const page = pages.at(-1)!;
   const viewKey = page === 'list' ? `list:${tab}` : page === 'detail' ? `detail:${detailKey?.kind}:${detailKey?.id}` : 'editor';
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
@@ -255,7 +259,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
     if (!snapshot) return;
     if (menuKey && !menu) closeMenu();
     if (detailKey && !detail && page === 'detail') returnToList();
-  }, [snapshot, menuKey, detailKey, page]);
+  }, [snapshot, menuKey, detailKey, page, tab]);
 
   const rule = useMemo(() => editor ? {
     frequency: editor.frequency, slots: editor.slots,
@@ -281,7 +285,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   }, [rule, zone, complete]);
 
   const dateTime = (at: number | undefined | null, timeZone = zone ?? snapshot?.timeZone, relative = false) => at == null ? '—'
-    : `${scheduleDateTime(at, timeZone!)}${relative && snapshot ? ` (${scheduledRelativeTime(at, snapshot.serverNow)})` : ''}`;
+    : `${scheduleDateTime(at, timeZone!, currentYear)}${relative && snapshot ? ` (${scheduledRelativeTime(at, snapshot.serverNow)})` : ''}`;
   const change = (update: Partial<Editor>) => {
     setEditor((current) => current ? { ...current, ...update } : current);
     setDirty(true);
@@ -468,7 +472,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
   const language = getLangCode();
   const renderList = () => <div className="scheduled-list-body">
       {items.length ? <ul className="scheduled-list">{items.map(selection => <ScheduledMessageRow key={`${selection.kind}:${selection.item.id}`} selection={selection}
-        timeHint={selection.kind === 'task' && selection.item.state === 'active' && snapshot ? scheduledTaskTimeHint(selection.item, snapshot.serverNow) : ''} language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
+        currentYear={currentYear} timeHint={selection.kind === 'task' && selection.item.state === 'active' && snapshot ? scheduledTaskTimeHint(selection.item, snapshot.serverNow) : ''} language={language} saving={saving} pendingAction={pending?.id === selection.item.id && pending.kind === selection.kind ? pending.action : undefined}
         onDetail={rowDetail} onEdit={rowEdit} onMenu={rowMenu} />)}</ul> : <p className="scheduled-empty">{t(snapshot ? 'scheduled.empty' : 'scheduled.loading')}</p>}
     </div>;
 
@@ -523,14 +527,14 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
           <span className="settings-page-row-label">{editor.frequency === 'weekly' ? t(`scheduled.day.${slot.weekday}`) : t('scheduled.sendTime')}</span>
           {editor.frequency === 'hourly' && <span>{t('scheduled.hourly')}</span>}
           <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.sendTime')} ${index + 1}`} onClick={() => openPicker('slot', index)}>
-            {editor.frequency === 'once' ? `${scheduledDisplayLocal(slot.date ?? '', true)} ${slot.time ?? ''}` : editor.frequency === 'hourly' ? String(slot.minute ?? 0).padStart(2, '0') : slot.time}
+            {editor.frequency === 'once' ? `${scheduledDisplayLocal(slot.date ?? '', currentYear)} ${slot.time ?? ''}` : editor.frequency === 'hourly' ? String(slot.minute ?? 0).padStart(2, '0') : slot.time}
           </button>
           {editor.frequency === 'hourly' && <span>{t('scheduled.minuteUnit')}</span>}
         </div>)}
       {editor.frequency !== 'once' && <div className="settings-page-row">
         <span className="settings-page-row-label">{t('scheduled.cutoff')}</span>
-        <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.cutoff')} ${scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.chooseCutoff')}`} onClick={() => openPicker('cutoff')}>
-          {scheduledDisplayLocal(editor.endsAtLocal, true) || t('scheduled.chooseCutoff')}
+        <button type="button" className="scheduled-value-button" aria-label={`${t('scheduled.cutoff')} ${scheduledDisplayLocal(editor.endsAtLocal, currentYear) || t('scheduled.chooseCutoff')}`} onClick={() => openPicker('cutoff')}>
+          {scheduledDisplayLocal(editor.endsAtLocal, currentYear) || t('scheduled.chooseCutoff')}
         </button>
       </div>}
     </div>
@@ -600,7 +604,7 @@ export default function ScheduledMessagesSheet({ scope, run, onClose, controller
       {(pending?.id === detail.item.id && pending.kind === detail.kind || detail.kind === 'exception' || detail.item.state !== 'active' || !detail.item.enabled || detail.item.blocked) &&
         <ValueRow label={t('scheduled.status')}>{pending?.id === detail.item.id && pending.kind === detail.kind ? <span role="status">{t(pending.action === 'trigger' ? 'scheduled.submitting' : 'scheduled.saving')}</span> : <StatusBadge selection={detail} />}</ValueRow>}
       {detail.kind === 'task' ? <>
-        <ValueRow label={t('scheduled.repeat')}>{scheduledRuleSummary(detail.item.rule)}</ValueRow>
+        <ValueRow label={t('scheduled.repeat')}>{scheduledRuleSummary(detail.item.rule, currentYear)}</ValueRow>
         <ValueRow label={t(detail.item.state === 'ended' ? 'scheduled.finished' : 'scheduled.next')}>
           {dateTime(detail.item.state === 'ended' ? detail.item.endedAt : detail.item.nextAt, detail.item.timeZone)}{detail.item.state === 'active' && snapshot && scheduledTaskTimeHint(detail.item, snapshot.serverNow) ? ` (${scheduledTaskTimeHint(detail.item, snapshot.serverNow)})` : ''}</ValueRow>
         {detail.item.rule.endsAt && <ValueRow label={t('scheduled.cutoff')}>{dateTime(Date.parse(detail.item.rule.endsAt), detail.item.timeZone)}</ValueRow>}

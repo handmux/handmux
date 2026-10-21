@@ -214,7 +214,7 @@ it('opens an unknown Agent notice recovery in the existing composer sheet withou
   fireEvent.click(screen.getByRole('button', { name: t('scheduled.continueAfterLimit') }));
   const message = await screen.findByLabelText(t('scheduled.message'));
   expect((message as HTMLTextAreaElement).value).toBe(t('common.continue'));
-  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 15:40');
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('10/20 15:40');
   expect(document.querySelector('textarea')).toBe(textarea);
   expect(textarea.value).toBe('my unsent message');
   expect(scheduledRequest).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), 'create', expect.anything());
@@ -233,7 +233,7 @@ it('waits for the shared server snapshot despite client clock skew and rounds re
   expect(screen.queryByLabelText(t('scheduled.message'))).toBeNull();
   await act(async () => { release(empty); await pending; });
   expect((await screen.findByLabelText(t('scheduled.message')) as HTMLTextAreaElement).value).toBe(t('common.continue'));
-  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 15:41');
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('10/20 15:41');
   fireEvent.change(screen.getByLabelText(t('scheduled.message')), { target: { value: 'edited seed' } });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
   fireEvent.click(screen.getByRole('button', { name: t('scheduled.save') }));
@@ -246,7 +246,7 @@ it.each([undefined, now - 120000])('uses the existing plus-hour default for unkn
   await act(async () => { await Promise.resolve(); });
   act(() => handle.current!.openScheduledRecovery({ agentId: 'new-agent', sessionId: 'session', tmuxSession: 'work', paneId: '%1', recovery: { kind: 'usage_limit', ...(retryAt === undefined ? {} : { retryAt }) } }));
   await screen.findByLabelText(t('scheduled.message'));
-  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('2026/10/20 16:30');
+  expect(screen.getByRole('button', { name: `${t('scheduled.sendTime')} 1` }).textContent).toBe('10/20 16:30');
 });
 it('rejects a retained recovery callback after pane or session changes and when send capability is absent', async () => {
   vi.mocked(scheduledRequest).mockResolvedValue(empty);
