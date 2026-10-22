@@ -12,6 +12,7 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- 全屏终端工具弱化外框和高光，按钮反馈更柔和。
 - 用量重置倒计时旁新增本地时区的预计重置日期和时间，以“约”标注。
 
 ### Fixed

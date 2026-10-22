@@ -52,7 +52,7 @@ const draggable = () => {
 };
 
 describe('full-screen terminal pager', () => {
-  it('uses visibly smaller hit targets with translucent gray depth and a clear border on black', () => {
+  it('keeps compact hit targets and a subtle border without a bright inset rim', () => {
     const view = render(<TerminalOverlays {...props()} />);
     const toggle = view.getByRole('button', { name: '展开终端工具' });
     const group = toggle.parentElement!;
@@ -69,17 +69,19 @@ describe('full-screen terminal pager', () => {
     const background = groupStyle.backgroundColor.match(/[\d.]+/g)!.map(Number);
     const border = groupStyle.borderLeftColor.match(/[\d.]+/g)!.map(Number);
     expect(background[3]).toBeCloseTo(0.12);
-    expect(border[3]).toBeCloseTo(0.38);
+    expect(border[3]).toBeGreaterThan(0);
+    expect(border[3]).toBeLessThanOrEqual(0.16);
     const grayOnBlack = background.slice(0, 3).map((channel) => channel * background[3]!);
     expect(grayOnBlack[0]).toBeCloseTo(13.44);
     expect(grayOnBlack[1]).toBeCloseTo(15.36);
     expect(grayOnBlack[2]).toBeCloseTo(18.24);
-    // The border remains perceptibly lighter than the translucent gray even over a black terminal.
+    // Preserve a quiet outline on black without turning it into a bright white frame.
     for (const [index, channel] of border.slice(0, 3).entries()) {
       const borderOnGray = channel * border[3]! + grayOnBlack[index]! * (1 - border[3]!);
-      expect(borderOnGray - grayOnBlack[index]!).toBeGreaterThan(60);
+      expect(borderOnGray - grayOnBlack[index]!).toBeGreaterThan(10);
+      expect(borderOnGray - grayOnBlack[index]!).toBeLessThan(40);
     }
-    expect(groupStyle.boxShadow).toContain('inset');
+    expect(groupStyle.boxShadow).not.toContain('inset');
     expect(['', '1']).toContain(groupStyle.opacity);
     fireEvent.click(toggle);
     for (const button of view.getAllByRole('button')) {

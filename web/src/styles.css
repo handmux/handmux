@@ -964,16 +964,16 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
 .term-pager::before { flex-grow: var(--pager-position, 0.5); }
 .term-pager::after { flex-grow: calc(1 - var(--pager-position, 0.5)); }
 .term-pager-grp + .term-pager-grp { margin-top: 10px; }
-/* Compact transparent capsules: a thin gray fill leaves terminal text sharp beneath them; the clear
-   rim and top glint separate them from the dark terminal without enlarging their hit area. */
+/* Compact transparent capsules: quiet outlines and a soft shadow leave terminal content prominent
+   without a bright inset rim or enlarging their hit area. */
 .term-pager-grp {
   display: flex; flex: none; flex-direction: column; align-items: stretch;
   pointer-events: auto;
   border-radius: 20px; overflow: hidden;
   background: rgba(112,128,152,0.12);
   -webkit-backdrop-filter: none; backdrop-filter: none;
-  border: 1px solid rgba(235,242,255,0.38);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 4px 18px rgba(0,0,0,.30);
+  border: 1px solid rgba(235,242,255,0.12);
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
 }
 /* Keep the same group height so the top toggle does not jump when the actions are hidden. */
 .term-pager-grp[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
@@ -981,7 +981,7 @@ button.settings-page-row:disabled, .settings-page-row.disabled { color: rgba(235
   width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
   padding: 0; border: none; background: transparent; color: rgba(255,255,255,0.92);
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-  transition: background .12s ease;
+  transition: background-color .16s ease, color .16s ease;
 }
 .term-pager-btn svg { width: 18px; height: 18px; }
 .term-pager-btn:active { background: rgba(255,255,255,0.14); }
