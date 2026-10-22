@@ -112,6 +112,137 @@ function prepareInput(
   if (autoFocusInput) term.focus();
 }
 
+/**
+ * Bookkeeping for {@link isDroppedImeCommit}, tracked per key sequence.
+ *
+ * Firefox with an active IME (e.g. fcitx5 on Linux) commits a bare full-width punctuation character
+ * without ever opening a composition session: a `keydown` with `keyCode === 229`, then a single
+ * `input` event carrying the character. xterm.js (5.5 and 6.0) drops that `input` event — its
+ * `_inputEvent` guard is `(!ev.composed || !this._keyDownSeen)`, and the 229 keydown has already set
+ * `_keyDownSeen` while Firefox reports `composed === true`. xterm instead leans on
+ * `CompositionHelper._handleAnyTextareaChanges()`, a `setTimeout(0)` diff of the helper textarea,
+ * which on Firefox usually never sees the inserted character, so the keystroke is lost silently.
+ * Pressing the key repeatedly occasionally lands on the timeout, which is why the loss is flaky.
+ */
+export interface DroppedImeCommitState {
+  /** A composition is in flight, or `compositionend` fired and its commit input is still on the way. */
+  composing: boolean;
+  /** The last `keydown` was the IME "Process" key (229) and no composition has started since. */
+  imeKeyDown: boolean;
+  /** The helper textarea value observed on that keydown, i.e. before the commit was inserted. */
+  valueBeforeCommit: string;
+  /** A keypress with a real char code followed it, so xterm's own keypress path already sent the character. */
+  keyPressDelivered: boolean;
+}
+
+/**
+ * Whether an `input` event is an IME commit that xterm.js dropped and this module must forward.
+ *
+ * `defaultPrevented` is the "xterm already consumed it" signal: xterm's capture-phase input listener
+ * runs first (it is registered in `term.open()`, before this listener) and calls `cancel(ev)` whenever
+ * its guard accepts the event. So a prevented event must never be forwarded again, which also keeps
+ * Chromium — where the same commit arrives with `composed === false` and is handled upstream — intact.
+ *
+ * `composing` keeps us out of a real composition session. It stays set across `compositionend`, because
+ * xterm delivers a committed composition from `_finalizeComposition`'s saved-position slice of the
+ * textarea, and the commit `input` event that belongs to that slice can still be queued behind it.
+ */
+export function isDroppedImeCommit(
+  event: Pick<InputEvent, 'inputType' | 'data' | 'isComposing' | 'defaultPrevented'>,
+  state: DroppedImeCommitState,
+): boolean {
+  return state.imeKeyDown
+    && !state.composing
+    && !state.keyPressDelivered
+    && event.inputType === 'insertText'
+    && !!event.data
+    && !event.isComposing
+    && !event.defaultPrevented;
+}
+
+/**
+ * Mirrors xterm's `Terminal._keyPress` character derivation: xterm only emits when it can produce a
+ * character code, and its `which` branch is itself gated on a non-zero `charCode`. Being more eager than
+ * xterm here would suppress the fallback for a commit that xterm never actually sent.
+ */
+function keyPressSendsText(event: KeyboardEvent): boolean {
+  if (event.charCode) return true;
+  const which = (event as KeyboardEvent & { which?: number | null }).which;
+  return (which === null || which === undefined) && !!event.keyCode;
+}
+
+/**
+ * Forward IME single-character commits that xterm.js drops on Firefox (see {@link DroppedImeCommitState}).
+ *
+ * Exactly-once delivery is the whole point here, and it is subtle: xterm's own 229 fallback diffs the
+ * helper textarea on a 0ms timeout and would forward the same character a second time. We neutralise it
+ * by restoring the textarea to the value the keydown saw, so that diff comes out empty. Ordering is
+ * safe either way — the timeout can run before the `input` event (textarea not yet updated: the diff is
+ * empty anyway) or after it (value already restored), but never between the insertion and the event,
+ * because both happen in the same task.
+ *
+ * Returns a disposer for the listeners; nothing is installed unless the desktop helper textarea exists.
+ */
+function installDroppedImeCommitFallback(
+  term: XTerm,
+  helper: HTMLTextAreaElement,
+): () => void {
+  const state: DroppedImeCommitState = {
+    composing: false,
+    imeKeyDown: false,
+    valueBeforeCommit: '',
+    keyPressDelivered: false,
+  };
+  const onKeyDown = (event: KeyboardEvent): void => {
+    state.composing = false; // a fresh key sequence, even one that continues an active composition
+    state.imeKeyDown = event.keyCode === 229 || event.key === 'Process';
+    state.valueBeforeCommit = helper.value;
+    state.keyPressDelivered = false;
+  };
+  const onKeyPress = (event: KeyboardEvent): void => {
+    if (state.imeKeyDown && keyPressSendsText(event)) state.keyPressDelivered = true;
+  };
+  const onCompositionStart = (): void => {
+    state.composing = true;
+    state.imeKeyDown = false;
+    state.keyPressDelivered = false;
+  };
+  const onCompositionEnd = (): void => {
+    // `compositionend` carries no delivery here: xterm's `_finalizeComposition` sends the composed text
+    // from a saved textarea position on its own 0ms timeout. Stay out of the way until the commit
+    // `input` event (or the next keydown) proves that slice is done.
+    state.composing = true;
+    state.imeKeyDown = false;
+  };
+  const onInput = (event: Event): void => {
+    const input = event as InputEvent;
+    if (input.inputType !== 'insertText') return;
+    // Decide before clearing: the non-composing input after compositionend is the commit xterm's
+    // finalize slice owns, and must not be forwarded.
+    const dropped = isDroppedImeCommit(input, state);
+    if (state.composing && !input.isComposing) state.composing = false;
+    if (input.defaultPrevented) state.imeKeyDown = false;
+    if (!dropped) return;
+    const data = input.data as string;
+    state.imeKeyDown = false;
+    term.input(data, true);
+    const { valueBeforeCommit } = state;
+    if (helper.value !== valueBeforeCommit) helper.value = valueBeforeCommit;
+  };
+  helper.addEventListener('keydown', onKeyDown, true);
+  helper.addEventListener('keypress', onKeyPress, true);
+  helper.addEventListener('compositionstart', onCompositionStart, true);
+  helper.addEventListener('compositionend', onCompositionEnd, true);
+  helper.addEventListener('input', onInput, true);
+  return () => {
+    helper.removeEventListener('keydown', onKeyDown, true);
+    helper.removeEventListener('keypress', onKeyPress, true);
+    helper.removeEventListener('compositionstart', onCompositionStart, true);
+    helper.removeEventListener('compositionend', onCompositionEnd, true);
+    helper.removeEventListener('input', onInput, true);
+  };
+}
+
 function usesAppleCommandKey(): boolean {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
   const platform = nav.userAgentData?.platform || nav.platform || '';
@@ -285,6 +416,9 @@ export function openXterm({
   helper?.addEventListener('focus', focus);
   helper?.addEventListener('blur', blur);
   prepareInput(term, host, desktop, autoFocusInput);
+  const disposeImeFallback = desktop && helper
+    ? installDroppedImeCommitFallback(term, helper)
+    : null;
 
   const linkProvider = term.registerLinkProvider({
     provideLinks(lineNo, callback) {
@@ -332,6 +466,7 @@ export function openXterm({
       dataSub?.dispose();
       binarySub?.dispose();
       selectionSub?.dispose();
+      disposeImeFallback?.();
       helper?.removeEventListener('focus', focus);
       helper?.removeEventListener('blur', blur);
       linkProvider.dispose();
