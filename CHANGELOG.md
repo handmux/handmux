@@ -4,6 +4,8 @@ All notable changes to handmux. Format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-22
+
 ### Added
 
 - 对话模式新增服务端定时消息，支持一次性、每小时、每天、每周及明确的循环截止时间（最长一年）；同一分屏多端共享、不同分屏独立，关闭客户端后服务器仍会发送。支持手动触发、暂停、终止、编辑时自动暂停、复制已结束消息，以及独立处理发送异常。
