@@ -114,6 +114,17 @@ describe('built-in AgentAdapter registry', () => {
       },
     )).resolves.toEqual({ kind: 'unknown', candidateIds: ['claude'] });
   });
+
+  it('recognizes an npm-installed Claude whose tmux command is claude.exe', async () => {
+    await expect(resolveAgentIdentity(
+      { ...pane, currentCommand: 'claude.exe' },
+      BUILTIN_AGENT_ADAPTERS,
+      context,
+    )).resolves.toMatchObject({
+      kind: 'matched',
+      adapter: { id: 'claude' },
+    });
+  });
 });
 
 describe('AgentAdapter contract validation', () => {

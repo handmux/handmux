@@ -375,6 +375,13 @@ describe('createClaudeEvents getStates (reads the hook state file)', () => {
     expect(await ev.getStates()).toEqual({});
   });
 
+  it('keeps a pane whose tmux command is claude.exe (npm install) as live', async () => {
+    const file = stateFile({ '%4': rec('prompt', { prompt: 'x' }, Date.now()) });
+    const commands = { listLivePanes: async () => liveAll(['%4'], { '%4': { cmd: 'claude.exe' } }) };
+    const ev = createClaudeEvents({ commands, push, file });
+    expect((await ev.getStates())['%4']).toMatchObject({ kind: 'working', agent: 'claude' });
+  });
+
   it('scopes the output to the given session set (per-device isolation), reconciling either way', async () => {
     const file = stateFile({ '%1': rec('prompt', { prompt: 'a' }, Date.now()), '%2': rec('prompt', { prompt: 'b' }, Date.now()) });
     const commands = {
