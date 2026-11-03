@@ -155,7 +155,7 @@ export const claude = {
   label: 'Claude Code',
   presentation: { iconId: 'claude' },
   process: {
-    commands: ['claude'],
+    commands: ['claude', 'claude.exe'],
     ambiguousCommand: (command: string) => VERSION_COMM_RE.test(command),
     verify: async (pane: LivePane, context: ProcessContext) => {
       const executable = (await context.inspectForeground(pane))?.executable;
@@ -175,10 +175,11 @@ export const claude = {
   },
   procName: 'claude',
   // Which tmux #{pane_current_command} values mean "this agent is still the pane's foreground app" (inbox
-  // liveness). Claude sets its process title to "claude", so an exact single-name match is right — for
-  // native-install machines (whose comm is the VERSION string) resolveVersionedComms below normalizes the
-  // cmd back to 'claude' at ingest, keeping every match here exact-name.
-  procNames: ['claude'],
+  // liveness). Claude sets its process title to "claude", and npm installs run the native binary as
+  // "claude.exe", so an exact name match is right — for native-install machines (whose comm is the VERSION
+  // string) resolveVersionedComms below normalizes the cmd back to 'claude' at ingest, keeping every match
+  // here exact-name.
+  procNames: ['claude', 'claude.exe'],
   // The `claude` CLI sets its process title to "claude" (verified via ps): match the program token at the
   // start of argv — bare "claude", "claude --continue", or an absolute path ending in /claude. Anchored so
   // "vim claude.js" / "node build/claude.js" don't match.
