@@ -476,6 +476,10 @@ start flags (matching env var in parens):
   --cpolar-region R             cpolar edge region, e.g. cn (HANDMUX_CPOLAR_REGION)
   --foreground, -f              run in the foreground (don't daemonize)
   --no-qr                       don't render the QR code
+  --no-codebuddy                skip the CodeBuddy integration and its per-pane process scan
+                                (HANDMUX_CODEBUDDY=0)
+  --pane-cache-ms N             max age in ms of the pane list the background Inbox pollers share,
+                                0-5000; 0 reads tmux on every poll (HANDMUX_PANE_CACHE_MS, default: 0)
 
 rarely needed (env or flag): --static-dir / --upload-exts
   (HANDMUX_STATIC_DIR / HANDMUX_UPLOAD_EXTS)

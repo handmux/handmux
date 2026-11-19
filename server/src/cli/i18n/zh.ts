@@ -475,6 +475,9 @@ start flag(括号内为对应环境变量):
   --cpolar-region R             cpolar 边缘区域,如 cn(HANDMUX_CPOLAR_REGION)
   --foreground, -f              前台运行(不后台化)
   --no-qr                       不渲染二维码
+  --no-codebuddy                跳过 CodeBuddy 集成及其逐窗格进程扫描(HANDMUX_CODEBUDDY=0)
+  --pane-cache-ms N             后台收件箱轮询共享的窗格列表最大缓存时长(毫秒),0-5000;
+                                0 = 每次轮询都读取 tmux(HANDMUX_PANE_CACHE_MS,默认:0)
 
 很少用到(环境变量或 flag):--static-dir / --upload-exts
   (HANDMUX_STATIC_DIR / HANDMUX_UPLOAD_EXTS)

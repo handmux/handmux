@@ -56,6 +56,7 @@ import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
 } from './agent-runtime/tmuxRuntime.js';
+import { cachedPaneSource } from './agent-runtime/cachedPaneSource.js';
 import { InboxPushProjection } from './agent-runtime/inboxPushProjection.js';
 import { defaultGit } from './git.js';
 import { createProjectTaskRuntime } from './projectTask/runtime.js';
@@ -67,6 +68,7 @@ import { CodexRestartReceiptStore } from './agents/codexRestartReceipt.js';
 import { ApiAccountService, apiAccountsPath } from './apiAccounts.js';
 import { ClaudeHookBridgeConnector } from '../connectors/claude/index.js';
 import { CodeBuddyHookBridgeConnector } from '../connectors/codebuddy/index.js';
+import { performanceSettingsFromEnv } from './performanceSettings.js';
 import { SERVER_VERSION, SERVER_VERSION_HEADER } from './version.js';
 import { defaultAgentIntegrationContext } from './cli/agentIntegration.js';
 
@@ -209,6 +211,13 @@ try {
 // core-seconds per second on a 35-pane host. Nothing the UI needs comes from that frequency, so the snapshot
 // runs at 3s: an Agent starting or exiting is noticed within that window.
 const agentPanes = new TmuxAgentPaneSource({ commands, pollMs: 3_000 });
+const perfSettings = performanceSettingsFromEnv(process.env, (message) => console.warn(`[handmux] ${message}`));
+// The Hook Bridges (250ms) and the Codex Inbox (500ms) poll continuously. With `paneCacheMs` set they share
+// one pane list up to that old instead of each spawning `tmux list-panes` per poll; every path that acts on
+// a pane keeps reading `agentPanes` live.
+const pollingPanes = perfSettings.paneCacheMs > 0
+  ? cachedPaneSource(agentPanes, perfSettings.paneCacheMs)
+  : agentPanes;
 // CodeBuddy's state file is read by the Inbox Connector below AND by the conversation lens's pane → session
 // bind, so it is resolved once here, above both.
 // A refused send is the hardest report to act on: the user sees "终端有未确认的草稿" over an editor they
@@ -228,6 +237,8 @@ const codebuddyEvents = createCodebuddyEvents({ stateFile: codebuddyStateFile })
 const agentProcess = createLocalAgentProcessContext();
 const agentRuntime = createBuiltinAgentRuntime({
   home: agentHome,
+  disabledAgents: perfSettings.codebuddy ? [] : ['codebuddy'],
+  inboxPanes: pollingPanes,
   panes: agentPanes,
   process: agentProcess,
   stateDirectory: agentRuntimeDirectory,
@@ -296,7 +307,7 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'claude'),
   hookStateFile: stateFile,
   eventDirectory: `${stateFile}.events`,
-  panes: agentPanes,
+  panes: pollingPanes,
   process: agentProcess,
   logger: (message, error) => {
     const detail = logDetail(error);
@@ -306,19 +317,21 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
 // CodeBuddy drives the same Hook pipeline into its own state file. Its out-of-band reconciliation — the
 // transcript read that closes a gate no Hook closes — is CodeBuddy's own (see connectors/codebuddy and
 // agents/codebuddyNativeTail.ts); the connector supplies it, so nothing is configured here.
-const codebuddyInboxBridge = new CodeBuddyHookBridgeConnector({
+// `codebuddy: false` skips it together with the Runtime adapter: even with no CodeBuddy installed it polls
+// every 250ms and runs a `ps` scan per pane to look for CodeBuddy.
+const codebuddyInboxBridge = perfSettings.codebuddy ? new CodeBuddyHookBridgeConnector({
   socketPath: agentRuntime.socketPath,
   credentialFile: path.join(agentRuntimeDirectory, 'bridge-credential.json'),
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'codebuddy'),
   hookStateFile: codebuddyStateFile,
   eventDirectory: `${codebuddyStateFile}.events`,
-  panes: agentPanes,
+  panes: pollingPanes,
   process: agentProcess,
   logger: (message, error) => {
     const detail = logDetail(error);
     console.warn(`[handmux] ${message}${detail}`);
   },
-});
+}) : null;
 const inboxPush = new InboxPushProjection({
   inbox: agentRuntime.inbox,
   runs: agentRuntime.runs,
@@ -334,7 +347,7 @@ agentRuntime.start().catch((error) => {
   }
 });
 claudeInboxBridge.start();
-codebuddyInboxBridge.start();
+codebuddyInboxBridge?.start();
 workspace.start().catch(() => {});
 
 // Keep an already-opted-in user's Claude hooks in step with this handmux version on restart: newly-added

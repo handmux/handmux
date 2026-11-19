@@ -5,6 +5,12 @@ import crypto from 'node:crypto';
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
 import type { ShortcutConfig } from '../shortcutConfig.js';
+import {
+  DEFAULT_CODEBUDDY,
+  DEFAULT_PANE_CACHE_MS,
+  parseBooleanSetting,
+  parsePaneCacheMs,
+} from '../performanceSettings.js';
 
 export const TUNNELS = ['none', 'cloudflare', 'cloudflare-named', 'ssh', 'natapp', 'cpolar'] as const;
 export type Tunnel = typeof TUNNELS[number];
@@ -66,6 +72,10 @@ export interface ResolvedConfig {
   /** Legacy top-level config, retained as an input compatibility surface. */
   xfyun: XfyunConfig | null;
   shortcuts: ShortcutConfig;
+  /** Run the CodeBuddy integration (see performanceSettings.ts). */
+  codebuddy: boolean;
+  /** Max age of the pane list shared by the background Inbox pollers; 0 reads tmux live. */
+  paneCacheMs: number;
   publicUrl: string | null;
   sshHost: string | null;
   remotePort: number | null;
@@ -164,6 +174,8 @@ export function resolveConfig(
     voice: parseVoice(fileCfg.voice, fileCfg.xfyun),
     xfyun: parseXfyun(fileCfg.xfyun),   // legacy voice input; parseVoice migrates it at runtime
     shortcuts: normalizeShortcuts(fileCfg.shortcuts),
+    codebuddy: parseBooleanSetting(pick('codebuddy', env.HANDMUX_CODEBUDDY, DEFAULT_CODEBUDDY), 'codebuddy'),
+    paneCacheMs: parsePaneCacheMs(pick('paneCacheMs', env.HANDMUX_PANE_CACHE_MS, DEFAULT_PANE_CACHE_MS)),
     // An explicit public URL is honoured for ANY tunnel mode — including 'none', so someone who runs their
     // own tunnel/reverse-proxy can still have handmux advertise (print + QR) their real domain. The
     // tunnel-specific blocks below only fill a *fallback* when it wasn't given.
@@ -324,6 +336,9 @@ export function explainConfig(
 
   const previewDomain = trace(flags, fileCfg, env, cfgPath, 'previewDomain', 'HANDMUX_PREVIEW_DOMAIN', null);
   add('previewDomain', previewDomain, previewDomain.value == null ? '(none)' : String(previewDomain.value));
+
+  add('codebuddy', trace(flags, fileCfg, env, cfgPath, 'codebuddy', 'HANDMUX_CODEBUDDY', DEFAULT_CODEBUDDY));
+  add('paneCacheMs', trace(flags, fileCfg, env, cfgPath, 'paneCacheMs', 'HANDMUX_PANE_CACHE_MS', DEFAULT_PANE_CACHE_MS));
 
   if (t === 'ssh') {
     add('sshHost', trace(flags, fileCfg, env, cfgPath, 'sshHost', 'HANDMUX_SSH_HOST', null));

@@ -5,6 +5,7 @@ import {
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
 import { TUNNELS } from './options.js';
 import { normalizeShortcuts } from '../shortcutConfig.js';
+import { MAX_PANE_CACHE_MS } from '../performanceSettings.js';
 import type { SupervisorConfig } from './supervisor.js';
 
 export interface SupervisorLaunchOptions {
@@ -33,12 +34,19 @@ const optionalString = (value: unknown, key: string): string | null | undefined 
   return value;
 };
 
-const optionalNumber = (value: unknown, key: string): number | null | undefined => {
+const optionalNumber = (value: unknown, key: string, min = 1, max = 65535): number | null | undefined => {
   if (value === undefined) return undefined;
   if (value === null) return null;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535) {
-    throw new Error(`invalid supervisor config: ${key} must be an integer from 1 to 65535`);
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`invalid supervisor config: ${key} must be an integer from ${min} to ${max}`);
   }
+  return value;
+};
+
+const optionalBoolean = (value: unknown, key: string): boolean | null | undefined => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'boolean') throw new Error(`invalid supervisor config: ${key} must be true or false`);
   return value;
 };
 
@@ -128,6 +136,8 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   const vapid = stringFields(record.vapid, ['public', 'private', 'subject'], 'vapid');
   const voice = voiceConfig(record.voice);
   const xfyun = stringFields(record.xfyun, ['appId', 'apiKey', 'apiSecret'], 'xfyun');
+  const codebuddy = optionalBoolean(record.codebuddy, 'codebuddy');
+  const paneCacheMs = optionalNumber(record.paneCacheMs, 'paneCacheMs', 0, MAX_PANE_CACHE_MS);
   if (name !== undefined) config.name = name;
   if (staticDir !== undefined) config.staticDir = staticDir;
   if (uploadExts !== undefined) config.uploadExts = uploadExts;
@@ -146,6 +156,8 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   if (vapid !== undefined) config.vapid = vapid;
   if (voice !== undefined) config.voice = voice;
   if (xfyun !== undefined) config.xfyun = xfyun;
+  if (typeof codebuddy === 'boolean') config.codebuddy = codebuddy;
+  if (typeof paneCacheMs === 'number') config.paneCacheMs = paneCacheMs;
   return config;
 }
 

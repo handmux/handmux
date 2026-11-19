@@ -50,6 +50,17 @@ describe('supervisor launch contract', () => {
       tunnel: 'bogus', port: 19999, host: '0.0.0.0', token: 'secret',
     })).toThrow(/unknown tunnel/);
   });
+
+  it('retains the performance settings and leaves them unset for an older payload', () => {
+    const base = { tunnel: 'none', port: 19999, host: '0.0.0.0', token: 'secret' };
+    expect(parseSupervisorConfig({ ...base, codebuddy: false, paneCacheMs: 0 }))
+      .toMatchObject({ codebuddy: false, paneCacheMs: 0 });
+    expect(parseSupervisorConfig(base)).not.toHaveProperty('codebuddy');
+    expect(parseSupervisorConfig(base)).not.toHaveProperty('paneCacheMs');
+    expect(() => parseSupervisorConfig({ ...base, codebuddy: 'false' })).toThrow(/codebuddy must be true or false/);
+    expect(() => parseSupervisorConfig({ ...base, paneCacheMs: 5001 }))
+      .toThrow(/paneCacheMs must be an integer from 0 to 5000/);
+  });
   it('validates and retains provider-neutral voice configuration', () => {
     const voice = {
       provider: 'tencent',

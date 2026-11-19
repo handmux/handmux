@@ -43,6 +43,7 @@ import type {
   AgentRuntimeAdapterFactory,
   AgentRuntimeOptions,
 } from './runtime.js';
+import type { ReadonlyPaneSource } from './adapter.js';
 import type { AgentConversationActivityReader } from './conversationActivity.js';
 
 export type CodexRuntimeApp =
@@ -55,6 +56,12 @@ export type CodexRuntimeApp =
 export interface BuiltinAgentRuntimeOptions
   extends Omit<AgentRuntimeOptions, 'adapters' | 'adapterFactories'> {
   home?: string;
+  // Built-in Agent ids to leave out entirely: both the adapter and its factory are dropped, so the Agent
+  // gets no pane probing, Inbox, Conversation or Bridge lane.
+  disabledAgents?: readonly string[];
+  // Pane list for the Codex native Inbox poller only, which may be slightly old. Everything else, including
+  // Codex activation and restart, keeps the live `panes`.
+  inboxPanes?: Pick<ReadonlyPaneSource, 'list'>;
   codebuddyEvents?: Partial<NonNullable<Parameters<typeof createCodeBuddyConversationAdapter>[0]>['sessions']>
     & {
       paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): string | null;
@@ -181,6 +188,8 @@ export function createCodexConversationActivityReader(
 // still comes only from BUILTIN_AGENT_ADAPTERS, while factories close over local provider clients/Bridge.
 export function createBuiltinAgentRuntime({
   home,
+  disabledAgents = [],
+  inboxPanes,
   codebuddyEvents,
   codebuddyConversationControl,
   codebuddyInteractionControl,
@@ -353,6 +362,7 @@ export function createBuiltinAgentRuntime({
       const codexInboxSource = createCodexNativeInboxSource(codexApp);
       const inbox = new NativeInboxCoordinator({
         agentId: 'codex', sourceId: 'codex.app-server', context,
+        ...(inboxPanes === undefined ? {} : { panes: inboxPanes }),
         source: {
           async read(panes) {
             const snapshot = await codexInboxSource.read(panes);
@@ -393,9 +403,10 @@ export function createBuiltinAgentRuntime({
       };
     },
   };
+  const disabled = new Set(disabledAgents);
   return new AgentRuntime({
     ...runtimeOptions,
-    adapters: BUILTIN_AGENT_ADAPTERS,
-    adapterFactories: factories,
+    adapters: BUILTIN_AGENT_ADAPTERS.filter((adapter) => !disabled.has(adapter.id)),
+    adapterFactories: Object.fromEntries(Object.entries(factories).filter(([id]) => !disabled.has(id))),
   });
 }
