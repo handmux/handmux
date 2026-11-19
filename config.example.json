@@ -7,6 +7,7 @@
   "previewDomain": "",
   "staticDir": "",
   "codebuddy": true,
+  "paneCacheMs": 0,
   "shortcuts": {
     "command": [
       { "type": "key", "key": "C-c", "label": "Ctrl+C" }

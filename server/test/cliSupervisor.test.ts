@@ -109,8 +109,11 @@ describe('Supervisor process state wiring', () => {
     expect(childEnv.XFYUN_APPID).toBeUndefined();
   });
 
-  it('always injects the codebuddy setting so an inherited value cannot override the config', () => {
-    const serverEnv = (settings: { codebuddy?: boolean }, inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  it('always injects the performance settings so an inherited value cannot override the config', () => {
+    const serverEnv = (
+      settings: { codebuddy?: boolean; paneCacheMs?: number },
+      inherited: NodeJS.ProcessEnv,
+    ): NodeJS.ProcessEnv => {
       let childEnv: NodeJS.ProcessEnv = {};
       const spawnChild = vi.fn((
         _command: string,
@@ -130,9 +133,11 @@ describe('Supervisor process state wiring', () => {
       });
       return childEnv;
     };
-    expect(serverEnv({ codebuddy: false }, { HANDMUX_CODEBUDDY: '1' })).toMatchObject({ HANDMUX_CODEBUDDY: '0' });
-    // A payload written by an older CLI does not carry the setting.
-    expect(serverEnv({}, { HANDMUX_CODEBUDDY: '0' })).toMatchObject({ HANDMUX_CODEBUDDY: '1' });
+    expect(serverEnv({ codebuddy: false, paneCacheMs: 250 }, { HANDMUX_CODEBUDDY: '1', HANDMUX_PANE_CACHE_MS: '4000' }))
+      .toMatchObject({ HANDMUX_CODEBUDDY: '0', HANDMUX_PANE_CACHE_MS: '250' });
+    // A payload written by an older CLI carries neither setting.
+    expect(serverEnv({}, { HANDMUX_CODEBUDDY: '0', HANDMUX_PANE_CACHE_MS: '4000' }))
+      .toMatchObject({ HANDMUX_CODEBUDDY: '1', HANDMUX_PANE_CACHE_MS: '0' });
   });
 
   it('clears Server readiness immediately on exit and restarts with its own backoff', async () => {

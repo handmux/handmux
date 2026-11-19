@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InboxService } from '../src/agent-runtime/inbox.js';
 import { AgentRunRuntime } from '../src/agent-runtime/run.js';
-import type { LivePane } from '../src/agent-runtime/adapter.js';
+import type { LivePane, ReadonlyPaneSource } from '../src/agent-runtime/adapter.js';
 import type { AgentRuntimeCapabilityContext } from '../src/agent-runtime/runtime.js';
 import { NativeInboxCoordinator } from '../src/agents/nativeInbox.js';
 import type { NativeInboxSnapshot, NativeInboxSource } from '../src/agents/nativeInbox.js';
@@ -21,7 +21,9 @@ function pane(paneId: string, pid: number): LivePane {
 
 async function setup(
   initial: NativeInboxSnapshot,
-  options: { agentId?: string; sourceId?: string; source?: NativeInboxSource } = {},
+  options: {
+    agentId?: string; sourceId?: string; source?: NativeInboxSource; panes?: Pick<ReadonlyPaneSource, 'list'>;
+  } = {},
 ) {
   const panes = [pane('%1', 101), pane('%2', 202)];
   let snapshot = initial;
@@ -48,6 +50,7 @@ async function setup(
   const coordinator = new NativeInboxCoordinator({
     agentId, sourceId, context,
     source: options.source ?? { read: async () => structuredClone(snapshot) }, pollMs: 10_000,
+    ...(options.panes === undefined ? {} : { panes: options.panes }),
   });
   coordinators.push(coordinator);
   await Promise.all(panes.map((value) => runControl.attach({
@@ -295,6 +298,17 @@ describe('NativeInboxCoordinator', () => {
       expect.objectContaining({ run: expect.objectContaining({ paneId: '%1' }), state: 'working' }),
     ]);
     expect(h.inbox.read().availability.claude).toEqual({ availability: 'ready' });
+  });
+
+  it('polls with the given pane list instead of the Runtime one', async () => {
+    const read = vi.fn(async (_panes: readonly LivePane[]): Promise<NativeInboxSnapshot> => (
+      { availability: 'ready', rows: [] }
+    ));
+    const h = await setup({ availability: 'ready', rows: [] }, {
+      source: { read }, panes: { list: async () => [pane('%2', 202)] },
+    });
+    await h.coordinator.reconcile();
+    expect(read).toHaveBeenCalledWith([pane('%2', 202)]);
   });
 
   it('does not let a provider row recreate a Runtime-revoked process run', async () => {

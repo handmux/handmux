@@ -225,15 +225,20 @@ describe('resolveConfig', () => {
       chat: [],
     });
   });
-  it('resolves codebuddy from flag > file > env > default', () => {
-    expect(resolveConfig({}, {}, {}, gen).codebuddy).toBe(true);
-    expect(resolveConfig({}, {}, { HANDMUX_CODEBUDDY: '0' }, gen).codebuddy).toBe(false);
-    expect(resolveConfig({}, { codebuddy: false }, { HANDMUX_CODEBUDDY: '1' }, gen).codebuddy).toBe(false);
-    expect(resolveConfig(parseArgs(['start', '--codebuddy']).flags, { codebuddy: false }, {}, gen).codebuddy).toBe(true);
+  it('resolves codebuddy and paneCacheMs from flag > file > env > default', () => {
+    expect(resolveConfig({}, {}, {}, gen)).toMatchObject({ codebuddy: true, paneCacheMs: 0 });
+    expect(resolveConfig({}, {}, { HANDMUX_CODEBUDDY: '0', HANDMUX_PANE_CACHE_MS: '250' }, gen))
+      .toMatchObject({ codebuddy: false, paneCacheMs: 250 });
+    expect(resolveConfig({}, { codebuddy: false, paneCacheMs: 500 }, { HANDMUX_CODEBUDDY: '1', HANDMUX_PANE_CACHE_MS: '250' }, gen))
+      .toMatchObject({ codebuddy: false, paneCacheMs: 500 });
+    const { flags } = parseArgs(['start', '--codebuddy', '--pane-cache-ms', '2000']);
+    expect(resolveConfig(flags, { codebuddy: false, paneCacheMs: 500 }, {}, gen))
+      .toMatchObject({ codebuddy: true, paneCacheMs: 2000 });
     expect(resolveConfig(parseArgs(['start', '--no-codebuddy']).flags, {}, {}, gen).codebuddy).toBe(false);
   });
-  it('rejects a bad codebuddy', () => {
+  it('rejects a bad codebuddy or paneCacheMs', () => {
     expect(() => resolveConfig({}, { codebuddy: 'sometimes' }, {}, gen)).toThrow(/bad codebuddy/);
+    expect(() => resolveConfig({}, { paneCacheMs: 60_000 }, {}, gen)).toThrow(/bad pane-cache-ms/);
   });
 });
 
@@ -246,6 +251,7 @@ describe('explainConfig', () => {
     expect(by.name).toMatchObject({ display: 'EnvBox', origin: 'env' });
     expect(by.tunnel).toMatchObject({ display: 'none', origin: 'default' });
     expect(by.codebuddy).toMatchObject({ display: 'true', origin: 'default' });
+    expect(by.paneCacheMs).toMatchObject({ display: '0', origin: 'default' });
   });
   it('masks the token and never prints push/voice secrets', () => {
     const rows = explainConfig({ token: 'supersecrettoken1234' }, { vapid: { public: 'p', private: 'x' } }, '/c.json');

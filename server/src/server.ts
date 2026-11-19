@@ -56,6 +56,7 @@ import {
   createLocalAgentProcessContext,
   TmuxAgentPaneSource,
 } from './agent-runtime/tmuxRuntime.js';
+import { cachedPaneSource } from './agent-runtime/cachedPaneSource.js';
 import { InboxPushProjection } from './agent-runtime/inboxPushProjection.js';
 import { defaultGit } from './git.js';
 import { createProjectTaskRuntime } from './projectTask/runtime.js';
@@ -211,6 +212,12 @@ try {
 // runs at 3s: an Agent starting or exiting is noticed within that window.
 const agentPanes = new TmuxAgentPaneSource({ commands, pollMs: 3_000 });
 const perfSettings = performanceSettingsFromEnv(process.env, (message) => console.warn(`[handmux] ${message}`));
+// The Hook Bridges (250ms) and the Codex Inbox (500ms) poll continuously. With `paneCacheMs` set they share
+// one pane list up to that old instead of each spawning `tmux list-panes` per poll; every path that acts on
+// a pane keeps reading `agentPanes` live.
+const pollingPanes = perfSettings.paneCacheMs > 0
+  ? cachedPaneSource(agentPanes, perfSettings.paneCacheMs)
+  : agentPanes;
 // CodeBuddy's state file is read by the Inbox Connector below AND by the conversation lens's pane → session
 // bind, so it is resolved once here, above both.
 // A refused send is the hardest report to act on: the user sees "终端有未确认的草稿" over an editor they
@@ -231,6 +238,7 @@ const agentProcess = createLocalAgentProcessContext();
 const agentRuntime = createBuiltinAgentRuntime({
   home: agentHome,
   disabledAgents: perfSettings.codebuddy ? [] : ['codebuddy'],
+  inboxPanes: pollingPanes,
   panes: agentPanes,
   process: agentProcess,
   stateDirectory: agentRuntimeDirectory,
@@ -299,7 +307,7 @@ const claudeInboxBridge = new ClaudeHookBridgeConnector({
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'claude'),
   hookStateFile: stateFile,
   eventDirectory: `${stateFile}.events`,
-  panes: agentPanes,
+  panes: pollingPanes,
   process: agentProcess,
   logger: (message, error) => {
     const detail = logDetail(error);
@@ -317,7 +325,7 @@ const codebuddyInboxBridge = perfSettings.codebuddy ? new CodeBuddyHookBridgeCon
   stateDirectory: path.join(agentRuntimeDirectory, 'connectors', 'codebuddy'),
   hookStateFile: codebuddyStateFile,
   eventDirectory: `${codebuddyStateFile}.events`,
-  panes: agentPanes,
+  panes: pollingPanes,
   process: agentProcess,
   logger: (message, error) => {
     const detail = logDetail(error);

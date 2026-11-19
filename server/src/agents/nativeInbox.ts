@@ -1,7 +1,7 @@
 import type {
   AgentRuntimeCapabilityContext,
 } from '../agent-runtime/runtime.js';
-import type { LivePane } from '../agent-runtime/adapter.js';
+import type { LivePane, ReadonlyPaneSource } from '../agent-runtime/adapter.js';
 import type {
   InboxAvailability,
   InboxBaseline,
@@ -39,6 +39,8 @@ export interface NativeInboxCoordinatorOptions {
   context: AgentRuntimeCapabilityContext;
   source: NativeInboxSource;
   pollMs?: number;
+  // Pane list to poll with; defaults to the Runtime's live `context.panes`.
+  panes?: Pick<ReadonlyPaneSource, 'list'>;
 }
 
 interface TrackedPane {
@@ -97,6 +99,7 @@ export class NativeInboxCoordinator {
   readonly #context: AgentRuntimeCapabilityContext;
   readonly #source: NativeInboxSource;
   readonly #pollMs: number;
+  readonly #panes: Pick<ReadonlyPaneSource, 'list'>;
   readonly #tracked = new Map<string, TrackedPane>();
   #timer: NodeJS.Timeout | undefined;
   #tail: Promise<void> = Promise.resolve();
@@ -108,7 +111,7 @@ export class NativeInboxCoordinator {
   #projectionError: string | undefined;
 
   constructor({
-    agentId, sourceId, context, source, pollMs = 500,
+    agentId, sourceId, context, source, pollMs = 500, panes,
   }: NativeInboxCoordinatorOptions) {
     if (!agentId || !sourceId || !context || !source || typeof source.read !== 'function'
       || !Number.isSafeInteger(pollMs) || pollMs < 100) {
@@ -119,6 +122,7 @@ export class NativeInboxCoordinator {
     this.#context = context;
     this.#source = source;
     this.#pollMs = pollMs;
+    this.#panes = panes ?? context.panes;
   }
 
   start(): () => Promise<void> {
@@ -164,7 +168,7 @@ export class NativeInboxCoordinator {
     let panes: readonly LivePane[];
     let snapshot: NativeInboxSnapshot;
     try {
-      panes = await this.#context.panes.list();
+      panes = await this.#panes.list();
       snapshot = await this.#source.read(panes);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
