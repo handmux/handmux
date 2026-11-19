@@ -8,6 +8,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { providerMode, voiceProviderRegistry } from '../asr/providerRegistry.js';
+import { DEFAULT_CODEBUDDY } from '../performanceSettings.js';
 import { getDriver } from './drivers.js';
 import { writeState, clearState, claudeStatePath, codebuddyStatePath, pushStorePath, previewStorePath, notificationsDirPath } from './state.js';
 import {
@@ -40,6 +41,8 @@ export interface SupervisorConfig extends TunnelConfig {
   vapid?: VapidConfig | null;
   voice?: VoiceConfig | null;
   xfyun?: XfyunConfig | null;
+  // Optional so a payload written by an older CLI still launches, with the default.
+  codebuddy?: boolean;
 }
 interface ChildStream { on(event: 'data', listener: (chunk: unknown) => void): unknown }
 interface SupervisorChild {
@@ -216,6 +219,8 @@ export function supervise(cfg: SupervisorConfig, {
     if (cfg.staticDir) env.HANDMUX_STATIC_DIR = cfg.staticDir;
     if (cfg.uploadExts) env.HANDMUX_UPLOAD_EXTS = cfg.uploadExts;
     env.HANDMUX_SHORTCUTS = JSON.stringify(cfg.shortcuts);
+    // Always set, so a value inherited from the launching shell cannot override the resolved config.
+    env.HANDMUX_CODEBUDDY = (cfg.codebuddy ?? DEFAULT_CODEBUDDY) ? '1' : '0';
     if (cfg.vapid) {
       if (cfg.vapid.public) env.VAPID_PUBLIC = cfg.vapid.public;
       if (cfg.vapid.private) env.VAPID_PRIVATE = cfg.vapid.private;

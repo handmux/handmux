@@ -225,6 +225,16 @@ describe('resolveConfig', () => {
       chat: [],
     });
   });
+  it('resolves codebuddy from flag > file > env > default', () => {
+    expect(resolveConfig({}, {}, {}, gen).codebuddy).toBe(true);
+    expect(resolveConfig({}, {}, { HANDMUX_CODEBUDDY: '0' }, gen).codebuddy).toBe(false);
+    expect(resolveConfig({}, { codebuddy: false }, { HANDMUX_CODEBUDDY: '1' }, gen).codebuddy).toBe(false);
+    expect(resolveConfig(parseArgs(['start', '--codebuddy']).flags, { codebuddy: false }, {}, gen).codebuddy).toBe(true);
+    expect(resolveConfig(parseArgs(['start', '--no-codebuddy']).flags, {}, {}, gen).codebuddy).toBe(false);
+  });
+  it('rejects a bad codebuddy', () => {
+    expect(() => resolveConfig({}, { codebuddy: 'sometimes' }, {}, gen)).toThrow(/bad codebuddy/);
+  });
 });
 
 describe('explainConfig', () => {
@@ -235,6 +245,7 @@ describe('explainConfig', () => {
     expect(by.host).toMatchObject({ display: '127.0.0.1', origin: '/cfg.json' });
     expect(by.name).toMatchObject({ display: 'EnvBox', origin: 'env' });
     expect(by.tunnel).toMatchObject({ display: 'none', origin: 'default' });
+    expect(by.codebuddy).toMatchObject({ display: 'true', origin: 'default' });
   });
   it('masks the token and never prints push/voice secrets', () => {
     const rows = explainConfig({ token: 'supersecrettoken1234' }, { vapid: { public: 'p', private: 'x' } }, '/c.json');

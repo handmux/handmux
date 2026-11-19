@@ -6,6 +6,7 @@
   "token": "",
   "previewDomain": "",
   "staticDir": "",
+  "codebuddy": true,
   "shortcuts": {
     "command": [
       { "type": "key", "key": "C-c", "label": "Ctrl+C" }

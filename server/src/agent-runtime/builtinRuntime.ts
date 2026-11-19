@@ -55,6 +55,9 @@ export type CodexRuntimeApp =
 export interface BuiltinAgentRuntimeOptions
   extends Omit<AgentRuntimeOptions, 'adapters' | 'adapterFactories'> {
   home?: string;
+  // Built-in Agent ids to leave out entirely: both the adapter and its factory are dropped, so the Agent
+  // gets no pane probing, Inbox, Conversation or Bridge lane.
+  disabledAgents?: readonly string[];
   codebuddyEvents?: Partial<NonNullable<Parameters<typeof createCodeBuddyConversationAdapter>[0]>['sessions']>
     & {
       paneKind?(paneId: string, process?: { pid: number; startedAt?: number }): string | null;
@@ -181,6 +184,7 @@ export function createCodexConversationActivityReader(
 // still comes only from BUILTIN_AGENT_ADAPTERS, while factories close over local provider clients/Bridge.
 export function createBuiltinAgentRuntime({
   home,
+  disabledAgents = [],
   codebuddyEvents,
   codebuddyConversationControl,
   codebuddyInteractionControl,
@@ -393,9 +397,10 @@ export function createBuiltinAgentRuntime({
       };
     },
   };
+  const disabled = new Set(disabledAgents);
   return new AgentRuntime({
     ...runtimeOptions,
-    adapters: BUILTIN_AGENT_ADAPTERS,
-    adapterFactories: factories,
+    adapters: BUILTIN_AGENT_ADAPTERS.filter((adapter) => !disabled.has(adapter.id)),
+    adapterFactories: Object.fromEntries(Object.entries(factories).filter(([id]) => !disabled.has(id))),
   });
 }
