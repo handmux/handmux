@@ -42,6 +42,13 @@ const optionalNumber = (value: unknown, key: string): number | null | undefined 
   return value;
 };
 
+const optionalBoolean = (value: unknown, key: string): boolean | null | undefined => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'boolean') throw new Error(`invalid supervisor config: ${key} must be true or false`);
+  return value;
+};
+
 const stringFields = (value: unknown, keys: readonly string[], key: string): Record<string, string> | null | undefined => {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -128,6 +135,7 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   const vapid = stringFields(record.vapid, ['public', 'private', 'subject'], 'vapid');
   const voice = voiceConfig(record.voice);
   const xfyun = stringFields(record.xfyun, ['appId', 'apiKey', 'apiSecret'], 'xfyun');
+  const codebuddy = optionalBoolean(record.codebuddy, 'codebuddy');
   if (name !== undefined) config.name = name;
   if (staticDir !== undefined) config.staticDir = staticDir;
   if (uploadExts !== undefined) config.uploadExts = uploadExts;
@@ -146,6 +154,7 @@ export function parseSupervisorConfig(value: unknown): SupervisorConfig {
   if (vapid !== undefined) config.vapid = vapid;
   if (voice !== undefined) config.voice = voice;
   if (xfyun !== undefined) config.xfyun = xfyun;
+  if (typeof codebuddy === 'boolean') config.codebuddy = codebuddy;
   return config;
 }
 

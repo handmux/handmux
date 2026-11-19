@@ -50,6 +50,13 @@ describe('supervisor launch contract', () => {
       tunnel: 'bogus', port: 19999, host: '0.0.0.0', token: 'secret',
     })).toThrow(/unknown tunnel/);
   });
+
+  it('retains the codebuddy setting and leaves it unset for an older payload', () => {
+    const base = { tunnel: 'none', port: 19999, host: '0.0.0.0', token: 'secret' };
+    expect(parseSupervisorConfig({ ...base, codebuddy: false })).toMatchObject({ codebuddy: false });
+    expect(parseSupervisorConfig(base)).not.toHaveProperty('codebuddy');
+    expect(() => parseSupervisorConfig({ ...base, codebuddy: 'false' })).toThrow(/codebuddy must be true or false/);
+  });
   it('validates and retains provider-neutral voice configuration', () => {
     const voice = {
       provider: 'tencent',
